@@ -81,6 +81,13 @@ class MainActivity : Activity() {
                 pendingPermissionStep = null
                 showPocoGuide()
             }
+            "manual_system_vpn" -> {
+                pendingPermissionStep = null
+                BlockVpnService.refreshSystemModes(this)
+                window.decorView.postDelayed({
+                    if (!isFinishing) showPermissionCenter()
+                }, 300L)
+            }
             "vpn" -> Unit // VPN consent returns through onActivityResult().
             else -> Unit
         }
@@ -150,9 +157,11 @@ class MainActivity : Activity() {
     }
 
     private fun openSystemVpnSettings() {
+        pendingPermissionStep = "manual_system_vpn"
         try {
             startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
         } catch (_: Exception) {
+            pendingPermissionStep = null
             Toast.makeText(this, "Открой Android → Сеть и интернет → VPN.", Toast.LENGTH_LONG).show()
         }
     }
@@ -317,7 +326,7 @@ class MainActivity : Activity() {
             background = panelBackground()
         }
         val state = when (granted) {
-            true -> "✓ ГОТОВО"
+            true -> "✓ РАЗРЕШЕНО"
             false -> "НУЖНО РАЗРЕШИТЬ"
             null -> "РУЧНАЯ НАСТРОЙКА"
         }
@@ -333,7 +342,7 @@ class MainActivity : Activity() {
         card.addView(makeText(description, 12f, Color.LTGRAY).apply {
             setPadding(0, 0, 0, dp(9))
         })
-        val button = makeButton(if (granted == true) "УЖЕ ВКЛЮЧЕНО" else actionText, action)
+        val button = makeButton(if (granted == true) "РАЗРЕШЕНИЕ ЕСТЬ" else actionText, action)
         if (granted == true) {
             button.isEnabled = false
             button.alpha = 0.55f
