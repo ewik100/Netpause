@@ -20,6 +20,7 @@ class BlockVpnService : VpnService() {
         const val EXTRA_DURATION_MS = "duration_ms"
         const val EXTRA_RECONFIGURE = "reconfigure"
         const val ACTION_STOP = "ru.netpause.app.action.STOP_VPN"
+        const val ACTION_REFRESH_SYSTEM_MODES = "ru.netpause.app.action.REFRESH_SYSTEM_VPN_MODES"
         private const val CHANNEL_ID = "netpause_block"
         private const val NOTIFICATION_ID = 71
         private const val MAX_DURATION_MS = 120L * 60_000L
@@ -37,6 +38,16 @@ class BlockVpnService : VpnService() {
                 context.stopService(stopIntent)
             }
         }
+
+        fun refreshSystemModes(context: Context) {
+            try {
+                context.startService(
+                    Intent(context, BlockVpnService::class.java).setAction(ACTION_REFRESH_SYSTEM_MODES)
+                )
+            } catch (_: Exception) {
+                // Diagnostics are optional; disconnect controls remain available.
+            }
+        }
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
@@ -51,12 +62,21 @@ class BlockVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        saveSystemModeState()
+    }
+
+    private fun saveSystemModeState() {
         if (Build.VERSION.SDK_INT >= 29) {
             // Record system-managed VPN modes so the app can explain why
             // Android may restart a VPN independently of the in-app timer.
             prefs.edit()
                 .putBoolean("system_vpn_always_on", isAlwaysOn())
                 .putBoolean("system_vpn_lockdown", isLockdownEnabled())
+                .apply()
+        } else {
+            prefs.edit()
+                .putBoolean("system_vpn_always_on", false)
+                .putBoolean("system_vpn_lockdown", false)
                 .apply()
         }
     }
@@ -89,6 +109,12 @@ class BlockVpnService : VpnService() {
         ) {
             clearAndDisconnect()
             stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+
+        if (intent.action == ACTION_REFRESH_SYSTEM_MODES) {
+            saveSystemModeState()
+            if (vpnInterface == null) stopSelfResult(startId)
             return START_NOT_STICKY
         }
 
