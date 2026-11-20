@@ -145,7 +145,7 @@ class OverlayService : Service() {
     private fun createBubble() {
         val b = TextView(this).apply {
             text = "NP"
-            textSize = 17f
+            textSize = 16f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             setTypeface(typeface, android.graphics.Typeface.BOLD)
@@ -254,7 +254,7 @@ class OverlayService : Service() {
      */
     private fun stopVpnOnly() {
         prefs.edit().putLong("active_until", 0L).apply()
-        stopService(Intent(this, BlockVpnService::class.java))
+        BlockVpnService.requestStop(this)
         updateBubble()
         panelStatus?.text = statusText()
     }
