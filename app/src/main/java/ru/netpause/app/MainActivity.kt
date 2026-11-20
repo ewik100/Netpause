@@ -732,7 +732,7 @@ class MainActivity : Activity() {
         header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
 
         val version = TextView(this).apply {
-            text = "v1.3"
+            text = "v1.5"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(Color.rgb(115, 235, 230))
@@ -881,7 +881,7 @@ class MainActivity : Activity() {
 
             val durationSlider = SeekBar(this).apply {
                 max = 119
-                progress = selectedMinutes - 1
+                setProgress(selectedMinutes - 1)
                 progressTintList = android.content.res.ColorStateList.valueOf(Color.rgb(0, 205, 215))
                 thumbTintList = android.content.res.ColorStateList.valueOf(Color.rgb(125, 235, 245))
                 contentDescription = "Точная длительность сессии от 1 до 120 минут"
@@ -910,7 +910,7 @@ class MainActivity : Activity() {
             chips.forEach { chip ->
                 chip.setOnClickListener {
                     selectedMinutes = chip.tag as Int
-                    durationSlider.progress = selectedMinutes - 1
+                    durationSlider.setProgress(selectedMinutes - 1)
                 }
             }
             root.addView(durationCard, LinearLayout.LayoutParams(-1, -2).apply {
