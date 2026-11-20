@@ -47,6 +47,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        clearExpiredBlockState()
         window.statusBarColor = Color.rgb(10, 17, 35)
         window.navigationBarColor = Color.rgb(10, 17, 35)
 
@@ -63,6 +64,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        clearExpiredBlockState()
         when (pendingPermissionStep) {
             "overlay" -> {
                 pendingPermissionStep = null
@@ -81,6 +83,18 @@ class MainActivity : Activity() {
                 showPermissionCenter()
             }
             "vpn", "notifications", "manual_notifications" -> Unit
+        }
+    }
+
+    /**
+     * If the saved deadline has passed, force-stop the VPN service as a
+     * fail-safe. This also clears stale status after the app was backgrounded.
+     */
+    private fun clearExpiredBlockState() {
+        val until = prefs.getLong("active_until", 0L)
+        if (until > 0L && until <= System.currentTimeMillis()) {
+            stopService(Intent(this, BlockVpnService::class.java))
+            prefs.edit().putLong("active_until", 0L).apply()
         }
     }
 
@@ -485,6 +499,18 @@ class MainActivity : Activity() {
             })
             card.addView(makeButton(buttonText, action), LinearLayout.LayoutParams(-1, dp(48)))
             root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(13) })
+        }
+
+        if (blockActive) {
+            addSection(
+                "Экстренная остановка",
+                "Если интернет нужно вернуть немедленно, останови только VPN. Плавающая кнопка при этом останется на экране.",
+                "ОСТАНОВИТЬ ТОЛЬКО VPN"
+            ) {
+                stopService(Intent(this, BlockVpnService::class.java))
+                prefs.edit().putLong("active_until", 0L).apply()
+                showDashboard()
+            }
         }
 
         addSection(
