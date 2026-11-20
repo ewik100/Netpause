@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
@@ -22,6 +23,20 @@ class BlockVpnService : VpnService() {
         private const val CHANNEL_ID = "netpause_block"
         private const val NOTIFICATION_ID = 71
         private const val MAX_DURATION_MS = 120L * 60_000L
+
+        /**
+         * Ask the running VPN service to tear down its interface before it
+         * exits. This is more deterministic than relying only on stopService().
+         */
+        fun requestStop(context: Context) {
+            val stopIntent = Intent(context, BlockVpnService::class.java).setAction(ACTION_STOP)
+            try {
+                context.startService(stopIntent)
+            } catch (_: Exception) {
+                // Last-resort fallback; onDestroy() also closes the descriptor.
+                context.stopService(stopIntent)
+            }
+        }
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
@@ -30,8 +45,18 @@ class BlockVpnService : VpnService() {
     private val handler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("netpause_state", MODE_PRIVATE) }
     private val stopRunnable = Runnable {
-        prefs.edit().putLong("active_until", 0L).apply()
+        clearAndDisconnect()
         stopSelf()
+    }
+
+    private fun clearAndDisconnect() {
+        handler.removeCallbacks(stopRunnable)
+        prefs.edit().putLong("active_until", 0L).apply()
+        closeTunnel()
+        if (Build.VERSION.SDK_INT >= 24) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        }
+        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -39,12 +64,10 @@ class BlockVpnService : VpnService() {
         // descriptor releases Android's VPN interface immediately; removing
         // foreground state also removes the persistent VPN notification.
         if (intent?.action == ACTION_STOP) {
-            handler.removeCallbacks(stopRunnable)
-            prefs.edit().putLong("active_until", 0L).apply()
-            closeTunnel()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
-            stopSelf(startId)
+            // First release Android's VPN interface, then remove foreground UI,
+            // then stop the service. The separate overlay service is untouched.
+            clearAndDisconnect()
+            stopSelfResult(startId)
             return START_NOT_STICKY
         }
 
@@ -201,19 +224,12 @@ class BlockVpnService : VpnService() {
     }
 
     override fun onRevoke() {
-        handler.removeCallbacks(stopRunnable)
-        prefs.edit().putLong("active_until", 0L).apply()
-        closeTunnel()
-        stopSelf()
+        clearAndDisconnect()
         super.onRevoke()
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(stopRunnable)
-        prefs.edit().putLong("active_until", 0L).apply()
-        closeTunnel()
-        if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE)
-        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        clearAndDisconnect()
         super.onDestroy()
     }
 
