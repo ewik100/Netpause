@@ -493,7 +493,10 @@ class OverlayService : Service() {
         return if (left > 0) {
             val total = left / 1000
             "● БЛОКИРОВКА АКТИВНА  " + (total / 60) + ":" + (total % 60).toString().padStart(2, '0')
-        } else "○ БЛОКИРОВКА ВЫКЛЮЧЕНА"
+        } else {
+            val error = prefs.getString("last_error", null)
+            if (error.isNullOrBlank()) "○ БЛОКИРОВКА ВЫКЛЮЧЕНА" else "⚠ $error"
+        }
     }
 
     private fun updateBubble() {

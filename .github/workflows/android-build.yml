@@ -26,15 +26,21 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
-      - name: Prepare persistent signing key
+      - name: Prepare optional persistent signing key
         shell: bash
         run: |
-          printf '%s' "$NETPAUSE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/netpause-signing.p12"
-          chmod 600 "$RUNNER_TEMP/netpause-signing.p12"
+          if [ -n "$NETPAUSE_KEYSTORE_BASE64" ]; then
+            printf '%s' "$NETPAUSE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/netpause-signing.p12"
+            test -s "$RUNNER_TEMP/netpause-signing.p12"
+            chmod 600 "$RUNNER_TEMP/netpause-signing.p12"
+            echo "Persistent signing key detected."
+          else
+            echo "::warning::No persistent signing key configured. This APK will use a temporary debug key and cannot be installed as an in-place update to a differently signed build."
+          fi
         env:
           NETPAUSE_KEYSTORE_BASE64: ${{ secrets.NETPAUSE_KEYSTORE_BASE64 }}
 
-      - name: Build debug APK
+      - name: Build NetPause 1.5 APK
         env:
           NETPAUSE_KEYSTORE_FILE: ${{ runner.temp }}/netpause-signing.p12
           NETPAUSE_KEYSTORE_PASSWORD: ${{ secrets.NETPAUSE_KEYSTORE_PASSWORD }}
@@ -44,7 +50,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: NetPause-debug-apk
+          name: NetPause-1.5-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

@@ -19,6 +19,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.net.Uri
 import android.text.Editable
@@ -31,6 +33,7 @@ import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import java.util.Locale
@@ -45,6 +48,60 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("netpause_state", MODE_PRIVATE) }
 
     private var pendingPermissionStep: String? = null
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var dashboardVisible = false
+    private var dashboardRenderedActive = false
+    private var dashboardTimeLabel: TextView? = null
+    private var dashboardStateLabel: TextView? = null
+    private var dashboardDescriptionLabel: TextView? = null
+    private var dashboardErrorLabel: TextView? = null
+    private var dashboardOrbit: StatusOrbitView? = null
+
+    private val dashboardTicker = object : Runnable {
+        override fun run() {
+            if (!dashboardVisible || isFinishing) return
+            val now = System.currentTimeMillis()
+            val until = prefs.getLong("active_until", 0L)
+            val active = until > now
+
+            if (active != dashboardRenderedActive) {
+                if (!active) clearExpiredBlockState()
+                showDashboard()
+                return
+            }
+
+            if (active) {
+                val remaining = (until - now).coerceAtLeast(0L)
+                dashboardTimeLabel?.text = formatRemaining(remaining)
+                val total = prefs.getLong(
+                    "active_duration_ms",
+                    prefs.getInt("last_minutes", 30).coerceIn(1, 120) * 60_000L
+                ).coerceAtLeast(1L)
+                dashboardOrbit?.updateState(true, remaining.toFloat() / total.toFloat())
+            } else {
+                dashboardOrbit?.updateState(false, 0f)
+            }
+
+            val error = prefs.getString("last_error", null).orEmpty()
+            dashboardErrorLabel?.let {
+                it.text = error
+                it.visibility = if (error.isBlank()) View.GONE else View.VISIBLE
+            }
+            mainHandler.postDelayed(this, 1000L)
+        }
+    }
+
+    private fun formatRemaining(milliseconds: Long): String {
+        val seconds = (milliseconds.coerceAtLeast(0L) / 1000L)
+        return String.format(Locale.US, "%02d:%02d", seconds / 60L, seconds % 60L)
+    }
+
+    private fun scheduleDashboardTicker() {
+        if (!dashboardVisible) return
+        mainHandler.removeCallbacks(dashboardTicker)
+        mainHandler.postDelayed(dashboardTicker, 1000L)
+    }
 
     private data class LaunchApp(
         val packageName: String,
@@ -91,6 +148,18 @@ class MainActivity : Activity() {
             "vpn" -> Unit // VPN consent returns through onActivityResult().
             else -> Unit
         }
+        scheduleDashboardTicker()
+    }
+
+    override fun onPause() {
+        mainHandler.removeCallbacks(dashboardTicker)
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        dashboardVisible = false
+        mainHandler.removeCallbacks(dashboardTicker)
+        super.onDestroy()
     }
 
     /**
@@ -101,11 +170,14 @@ class MainActivity : Activity() {
         val until = prefs.getLong("active_until", 0L)
         if (until > 0L && until <= System.currentTimeMillis()) {
             BlockVpnService.requestStop(this)
-            prefs.edit().putLong("active_until", 0L).apply()
+            prefs.edit()
+                .putLong("active_until", 0L)
+                .putLong("active_duration_ms", 0L)
+                .apply()
         }
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     private fun pageBackground(): GradientDrawable = GradientDrawable(
         GradientDrawable.Orientation.TL_BR,
@@ -199,7 +271,8 @@ class MainActivity : Activity() {
             })
         }
 
-        val criticalReady = listOf(hasOverlayPermission(), hasVpnPermission()).count { it }
+        val vpnReady = hasVpnPermission()
+        val overlayReady = hasOverlayPermission()
         val optionalReady = listOf(notificationsGranted(), batteryUnrestricted()).count { it }
         val summary = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -207,13 +280,17 @@ class MainActivity : Activity() {
             background = panelBackground()
         }
         summary.addView(makeText(
-            "ОСНОВНЫЕ ДОСТУПЫ: $criticalReady ИЗ 2",
-            13f, if (criticalReady == 2) Color.rgb(95, 225, 160) else Color.rgb(255, 195, 115), true
+            "VPN: " + if (vpnReady) "РАЗРЕШЁН" else "НУЖНО РАЗРЕШИТЬ",
+            13f, if (vpnReady) Color.rgb(95, 225, 160) else Color.rgb(255, 195, 115), true
         ))
+        summary.addView(makeText(
+            "Плавающее окно: " + if (overlayReady) "разрешено" else "не обязательно · выключено",
+            11f, Color.LTGRAY
+        ).apply { setPadding(0, dp(5), 0, 0) })
         summary.addView(makeText(
             "Дополнительные настройки: $optionalReady из 2",
             11f, Color.LTGRAY
-        ).apply { setPadding(0, dp(5), 0, 0) })
+        ).apply { setPadding(0, dp(3), 0, 0) })
         root.addView(summary, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(13) })
 
         addPermissionItem(
@@ -528,21 +605,29 @@ class MainActivity : Activity() {
             showPermissionCenter("Сначала разреши локальный VPN. Это не включает блокировку.")
             return
         }
-        prefs.edit().putInt("last_minutes", safeMinutes).apply()
+        prefs.edit()
+            .putInt("last_minutes", safeMinutes)
+            .remove("last_error")
+            .apply()
         val vpn = Intent(this, BlockVpnService::class.java)
             .putExtra(BlockVpnService.EXTRA_DURATION_MS, safeMinutes * 60_000L)
         try {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(vpn) else startService(vpn)
-            Toast.makeText(this, "Блокировка запущена на $safeMinutes мин.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Запрос отправлен. Проверяю подключение VPN…", Toast.LENGTH_SHORT).show()
             showDashboard()
         } catch (_: Exception) {
+            prefs.edit().putString("last_error", "Не удалось запустить службу VPN. Проверь разрешения и повтори попытку.").apply()
             Toast.makeText(this, "Не удалось запустить блокировку. Проверь разрешения VPN.", Toast.LENGTH_LONG).show()
+            showDashboard()
         }
     }
 
     private fun stopVpnOnly() {
         // Clear the visible state first, then stop the VPN service itself.
-        prefs.edit().putLong("active_until", 0L).apply()
+        prefs.edit()
+            .putLong("active_until", 0L)
+            .putLong("active_duration_ms", 0L)
+            .apply()
         BlockVpnService.requestStop(this)
     }
 
@@ -555,6 +640,8 @@ class MainActivity : Activity() {
     }
 
     private fun setScreenContent(view: View) {
+        dashboardVisible = false
+        mainHandler.removeCallbacks(dashboardTicker)
         setContentView(view)
         if (Build.VERSION.SDK_INT >= 35) {
             val baseLeft = view.paddingLeft
@@ -600,6 +687,7 @@ class MainActivity : Activity() {
             remainingSeconds % 60L
         )
         var selectedMinutes = prefs.getInt("last_minutes", 30).coerceIn(1, 120)
+        dashboardRenderedActive = blockActive
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
@@ -677,33 +765,58 @@ class MainActivity : Activity() {
             val total = prefs.getInt("last_minutes", 30).coerceIn(1, 120) * 60_000L
             (remainingMs.toFloat() / total.toFloat()).coerceIn(0f, 1f)
         } else 0f
+        val orbit = StatusOrbitView(blockActive, progress)
+        dashboardOrbit = orbit
         hero.addView(
-            StatusOrbitView(blockActive, progress),
+            orbit,
             LinearLayout.LayoutParams(dp(112), dp(112)).apply { marginEnd = dp(12) }
         )
         val heroInfo = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        heroInfo.addView(makeText(
+        val stateLabel = makeText(
             if (blockActive) "СЕССИЯ ИДЁТ" else "СИСТЕМА ГОТОВА",
             11f,
             if (blockActive) Color.rgb(100, 230, 165) else Color.rgb(100, 225, 235),
             true
-        ))
-        heroInfo.addView(makeText(
+        )
+        dashboardStateLabel = stateLabel
+        heroInfo.addView(stateLabel)
+        val timerLabel = makeText(
             if (blockActive) timeLabel else "VPN отключён",
             if (blockActive) 27f else 21f,
             Color.WHITE,
             true
-        ).apply { setPadding(0, dp(5), 0, dp(4)) })
-        heroInfo.addView(makeText(
+        ).apply { setPadding(0, dp(5), 0, dp(4)) }
+        dashboardTimeLabel = timerLabel
+        heroInfo.addView(timerLabel)
+        val descriptionLabel = makeText(
             if (blockActive) "До автоматической остановки"
             else "Подключение появится только после твоего запуска.",
             11f, Color.rgb(190, 205, 225)
-        ))
+        )
+        dashboardDescriptionLabel = descriptionLabel
+        heroInfo.addView(descriptionLabel)
         hero.addView(heroInfo, LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+        root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+
+        val errorLabel = makeText(
+            prefs.getString("last_error", null).orEmpty(),
+            12f, Color.rgb(255, 190, 145)
+        ).apply {
+            visibility = if (text.isNullOrBlank()) View.GONE else View.VISIBLE
+            setPadding(dp(12), dp(8), dp(12), dp(12))
+            background = GradientDrawable().apply {
+                setColor(Color.rgb(62, 39, 43))
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(1), Color.rgb(150, 80, 80))
+            }
+        }
+        dashboardErrorLabel = errorLabel
+        root.addView(errorLabel, LinearLayout.LayoutParams(-1, -2).apply {
+            bottomMargin = dp(12)
+        })
 
         if (blockActive) {
             root.addView(makeButton("ОСТАНОВИТЬ БЛОКИРОВКУ") {
@@ -760,18 +873,44 @@ class MainActivity : Activity() {
             }
             updatePresetStyle()
             durationCard.addView(presets)
+            val preciseDurationLabel = makeText(
+                "Точная длительность: $selectedMinutes мин",
+                11f, Color.rgb(185, 210, 235), true
+            ).apply { setPadding(dp(2), dp(10), 0, dp(2)) }
+            durationCard.addView(preciseDurationLabel)
+
+            val durationSlider = SeekBar(this).apply {
+                max = 119
+                progress = selectedMinutes - 1
+                progressTintList = android.content.res.ColorStateList.valueOf(Color.rgb(0, 205, 215))
+                thumbTintList = android.content.res.ColorStateList.valueOf(Color.rgb(125, 235, 245))
+                contentDescription = "Точная длительность сессии от 1 до 120 минут"
+            }
+            durationCard.addView(durationSlider, LinearLayout.LayoutParams(-1, dp(36)))
+
             val startButton = makeButton("НАЧАТЬ БЛОКИРОВКУ  ·  " + selectedMinutes + " МИН") {
                 startSession(selectedMinutes)
             }
             durationCard.addView(startButton, LinearLayout.LayoutParams(-1, dp(49)).apply {
-                topMargin = dp(12)
+                topMargin = dp(8)
             })
-            chips.forEach { chip ->
-                chip.setOnClickListener {
-                    selectedMinutes = chip.tag as Int
+
+            durationSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progressValue: Int, fromUser: Boolean) {
+                    selectedMinutes = progressValue + 1
+                    preciseDurationLabel.text = "Точная длительность: $selectedMinutes мин"
                     prefs.edit().putInt("last_minutes", selectedMinutes).apply()
                     updatePresetStyle()
                     startButton.text = "НАЧАТЬ БЛОКИРОВКУ  ·  " + selectedMinutes + " МИН"
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+            })
+
+            chips.forEach { chip ->
+                chip.setOnClickListener {
+                    selectedMinutes = chip.tag as Int
+                    durationSlider.progress = selectedMinutes - 1
                 }
             }
             root.addView(durationCard, LinearLayout.LayoutParams(-1, -2).apply {
@@ -879,6 +1018,8 @@ class MainActivity : Activity() {
         })
 
         setScreenContent(scroll)
+        dashboardVisible = true
+        scheduleDashboardTicker()
         root.alpha = 0f
         root.translationY = dp(6).toFloat()
         root.animate().alpha(1f).translationY(0f).setDuration(240L).start()
@@ -898,7 +1039,7 @@ class MainActivity : Activity() {
             background = pageBackground()
         }
         scroll.addView(root)
-        root.addView(makeText("NETPAUSE 1.3", 26f, Color.rgb(100, 230, 240), true))
+        root.addView(makeText("NETPAUSE 1.5", 26f, Color.rgb(100, 230, 240), true))
         root.addView(makeText("Локальный инструмент цифрового фокуса", 14f, Color.WHITE, true)
             .apply { setPadding(0, dp(7), 0, dp(15)) })
 
@@ -907,7 +1048,8 @@ class MainActivity : Activity() {
             "ИСКЛЮЧЕНИЯ" to "Приложения из списка исключений обходят локальный VPN и сохраняют доступ к интернету. Список хранится на устройстве и может быть изменён в любое время.",
             "ПРИВАТНОСТЬ" to "В этой версии нет аккаунта и собственного сервера. NetPause не отправляет историю использования на сервер. Само приложение не анализирует содержимое трафика.",
             "ВАЖНО" to "Пока блокировка включена, интернет у остальных приложений недоступен. При проблемах останови VPN кнопкой в NetPause или системным переключателем VPN. Поведение нужно проверить на конкретной версии Android и оболочке POCO.",
-            "СТАТУС ВЕРСИИ" to "Версия 1.3 предназначена для тестирования. Перед публикацией в Google Play необходимы отдельная проверка совместимости, корректная подпись релизной сборки, политика конфиденциальности и проверка соответствия правилам магазина."
+            "НОВЫЕ ВОЗМОЖНОСТИ" to "Версия 1.5 обновляет экран сессии в реальном времени, добавляет точную настройку длительности от 1 до 120 минут и показывает понятную ошибку, если VPN не удалось запустить.",
+            "СТАТУС ВЕРСИИ" to "Версия 1.5 — тестовая сборка. Перед публикацией в Google Play необходимы отдельная проверка совместимости, постоянная подпись релизной сборки, политика конфиденциальности и проверка соответствия правилам магазина."
         )
         notes.forEach { (heading, body) ->
             val card = LinearLayout(this).apply {
@@ -929,10 +1071,18 @@ class MainActivity : Activity() {
     }
 
     private inner class StatusOrbitView(
-        private val active: Boolean,
-        private val progress: Float
+        initialActive: Boolean,
+        initialProgress: Float
     ) : View(this) {
+        private var active: Boolean = initialActive
+        private var progress: Float = initialProgress.coerceIn(0f, 1f)
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        fun updateState(activeNow: Boolean, progressNow: Float) {
+            active = activeNow
+            progress = progressNow.coerceIn(0f, 1f)
+            invalidate()
+        }
         private var phase = 0f
         private val pulse = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 2200L

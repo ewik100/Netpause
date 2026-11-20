@@ -83,7 +83,10 @@ class BlockVpnService : VpnService() {
 
     private fun clearAndDisconnect() {
         handler.removeCallbacks(stopRunnable)
-        prefs.edit().putLong("active_until", 0L).apply()
+        prefs.edit()
+            .putLong("active_until", 0L)
+            .putLong("active_duration_ms", 0L)
+            .apply()
         closeTunnel()
         if (Build.VERSION.SDK_INT >= 24) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -135,13 +138,18 @@ class BlockVpnService : VpnService() {
         val duration = (intent?.getLongExtra(EXTRA_DURATION_MS, 30 * 60_000L)
             ?: 30 * 60_000L).coerceIn(1_000L, MAX_DURATION_MS)
         val reconfigure = intent?.getBooleanExtra(EXTRA_RECONFIGURE, false) == true
+        prefs.edit().remove("last_error").apply()
 
         // Establish the VPN interface first. On Android 14+, VPN foreground
         // services may use the systemExempted type only while the VPN is active.
         if (vpnInterface == null || reconfigure) {
             if (reconfigure) closeTunnel()
             if (!establishTunnel()) {
-                prefs.edit().putLong("active_until", 0L).apply()
+                prefs.edit()
+                    .putLong("active_until", 0L)
+                    .putLong("active_duration_ms", 0L)
+                    .putString("last_error", "Не удалось создать локальный VPN-туннель. Проверь разрешение VPN и системные настройки.")
+                    .apply()
                 stopSelf(startId)
                 return START_NOT_STICKY
             }
@@ -152,13 +160,21 @@ class BlockVpnService : VpnService() {
         } catch (_: Exception) {
             // Fail open: never leave a tunnel running if foreground promotion
             // is rejected by the OS or device policy.
-            prefs.edit().putLong("active_until", 0L).apply()
+            prefs.edit()
+                .putLong("active_until", 0L)
+                .putLong("active_duration_ms", 0L)
+                .putString("last_error", "Android не разрешил запустить уведомление службы VPN. Проверь разрешения уведомлений и повтори запуск.")
+                .apply()
             closeTunnel()
             stopSelf(startId)
             return START_NOT_STICKY
         }
 
-        prefs.edit().putLong("active_until", System.currentTimeMillis() + duration).apply()
+        prefs.edit()
+            .putLong("active_until", System.currentTimeMillis() + duration)
+            .putLong("active_duration_ms", duration)
+            .remove("last_error")
+            .apply()
         handler.removeCallbacks(stopRunnable)
         handler.postDelayed(stopRunnable, duration)
         return START_NOT_STICKY
@@ -283,6 +299,7 @@ class BlockVpnService : VpnService() {
     }
 
     override fun onRevoke() {
+        prefs.edit().putString("last_error", "Android отозвал разрешение локального VPN. Разреши VPN заново в центре разрешений.").apply()
         clearAndDisconnect()
         super.onRevoke()
     }
