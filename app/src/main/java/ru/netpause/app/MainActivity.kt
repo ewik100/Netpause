@@ -73,9 +73,13 @@ class MainActivity : Activity() {
         super.onResume()
         clearExpiredBlockState()
         when (pendingPermissionStep) {
-            "manual_overlay", "manual_battery", "manual_poco", "manual_notifications" -> {
+            "manual_overlay", "manual_battery", "manual_notifications" -> {
                 pendingPermissionStep = null
                 showPermissionCenter()
+            }
+            "manual_poco" -> {
+                pendingPermissionStep = null
+                showPocoGuide()
             }
             "vpn" -> Unit // VPN consent returns through onActivityResult().
             else -> Unit
@@ -554,8 +558,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         val avatar = TextView(this).apply {
-            text = "N"
-            textSize = 25f
+            text = "NP"
+            textSize = 17f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
