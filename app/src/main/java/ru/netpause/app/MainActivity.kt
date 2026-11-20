@@ -742,7 +742,8 @@ class MainActivity : Activity() {
                     chip.setTextColor(if (selected) Color.WHITE else Color.rgb(205, 218, 236))
                 }
             }
-            listOf(15, 30, 45, 60, 90, 120).forEach { value ->
+            val presetValues = (listOf(15, 30, 60, 90, 120) + selectedMinutes).distinct().sorted().take(6)
+            presetValues.forEach { value ->
                 val chip = TextView(this).apply {
                     text = value.toString()
                     tag = value
@@ -849,7 +850,7 @@ class MainActivity : Activity() {
         ) {
             if (overlayRunning) stopOverlayService() else {
                 startOverlayService()
-                showDashboard()
+                if (hasOverlayPermission()) showDashboard()
             }
         }
 
