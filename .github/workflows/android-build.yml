@@ -26,7 +26,20 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
+      - name: Prepare persistent signing key
+        if: ${{ secrets.NETPAUSE_KEYSTORE_BASE64 != '' }}
+        shell: bash
+        run: |
+          printf '%s' "$NETPAUSE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/netpause-signing.p12"
+          chmod 600 "$RUNNER_TEMP/netpause-signing.p12"
+        env:
+          NETPAUSE_KEYSTORE_BASE64: ${{ secrets.NETPAUSE_KEYSTORE_BASE64 }}
+
       - name: Build debug APK
+        env:
+          NETPAUSE_KEYSTORE_FILE: ${{ runner.temp }}/netpause-signing.p12
+          NETPAUSE_KEYSTORE_PASSWORD: ${{ secrets.NETPAUSE_KEYSTORE_PASSWORD }}
+          NETPAUSE_KEY_ALIAS: netpause
         run: gradle --no-daemon assembleDebug
 
       - name: Upload APK
