@@ -186,6 +186,7 @@ class BlockVpnService : VpnService() {
         handler.removeCallbacks(stopRunnable)
         prefs.edit().putLong("active_until", 0L).apply()
         closeTunnel()
+        stopSelf()
         super.onRevoke()
     }
 
