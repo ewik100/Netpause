@@ -35,15 +35,21 @@ class BlockVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
-
+        // Handle the stop command before entering foreground mode. Closing the
+        // descriptor releases Android's VPN interface immediately; removing
+        // foreground state also removes the persistent VPN notification.
         if (intent?.action == ACTION_STOP) {
-            prefs.edit().putLong("active_until", 0L).apply()
             handler.removeCallbacks(stopRunnable)
-            stopSelf()
+            prefs.edit().putLong("active_until", 0L).apply()
+            closeTunnel()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+            stopSelf(startId)
             return START_NOT_STICKY
         }
+
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, buildNotification())
 
         val duration = (intent?.getLongExtra(EXTRA_DURATION_MS, 30 * 60_000L)
             ?: 30 * 60_000L).coerceIn(1_000L, MAX_DURATION_MS)
@@ -195,6 +201,7 @@ class BlockVpnService : VpnService() {
         prefs.edit().putLong("active_until", 0L).apply()
         closeTunnel()
         if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE)
+        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
         super.onDestroy()
     }
 
