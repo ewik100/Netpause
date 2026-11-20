@@ -250,6 +250,17 @@ class OverlayService : Service() {
         }
     }
 
+    /**
+     * Stop only the VPN tunnel/service. The floating overlay is a separate
+     * service and deliberately remains visible after this method returns.
+     */
+    private fun stopVpnOnly() {
+        prefs.edit().putLong("active_until", 0L).apply()
+        stopService(Intent(this, BlockVpnService::class.java))
+        updateBubble()
+        panelStatus?.text = statusText()
+    }
+
     private fun hideBubbleOnly() {
         prefs.edit().putBoolean("overlay_enabled", false).apply()
         stopSelf()
@@ -411,10 +422,13 @@ class OverlayService : Service() {
             setTextColor(Color.rgb(255, 190, 195))
             background = rounded(Color.rgb(58, 43, 65), 13)
             setOnClickListener {
-                stopService(Intent(this@OverlayService, BlockVpnService::class.java))
-                prefs.edit().putLong("active_until", 0L).apply()
+                stopVpnOnly()
                 closePanel()
-                Toast.makeText(this@OverlayService, "VPN-блокировка отключена", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this@OverlayService,
+                    "VPN полностью остановлен. Плавающее окно осталось включено.",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
         root.addView(stop, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(8) })
