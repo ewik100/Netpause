@@ -732,7 +732,7 @@ class MainActivity : Activity() {
         header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
 
         val version = TextView(this).apply {
-            text = "v1.3"
+            text = "v1.5"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(Color.rgb(115, 235, 230))
