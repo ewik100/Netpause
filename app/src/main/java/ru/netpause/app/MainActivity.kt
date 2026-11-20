@@ -42,7 +42,7 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.rgb(10, 17, 35)
         window.navigationBarColor = Color.rgb(10, 17, 35)
 
-        if (hasCorePermissions()) showDashboard() else showPermissionCenter()
+        if (!prefs.getBoolean("permission_center_v031_seen", false) || !hasCorePermissions()) showPermissionCenter() else showDashboard()
     }
 
     override fun onResume() {
@@ -66,7 +66,8 @@ class MainActivity : Activity() {
             continuePermissionFlow()
         } else if (hasCorePermissions()) {
             if (prefs.getBoolean("overlay_enabled", false)) startOverlayService()
-            showDashboard()
+            if (prefs.getBoolean("permission_center_v031_seen", false)) showDashboard()
+            else showPermissionCenter()
         } else {
             showPermissionCenter()
         }
@@ -193,6 +194,7 @@ class MainActivity : Activity() {
 
         if (hasCorePermissions()) {
             root.addView(makeButton("ПРОДОЛЖИТЬ В NETPAUSE") {
+                prefs.edit().putBoolean("permission_center_v031_seen", true).apply()
                 showDashboard()
             }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(14) })
         }
@@ -287,7 +289,10 @@ class MainActivity : Activity() {
         permissionFlowRunning = false
         pendingPermissionStep = null
         if (hasCorePermissions()) {
-            prefs.edit().putBoolean("overlay_enabled", true).apply()
+            prefs.edit()
+                .putBoolean("overlay_enabled", true)
+                .putBoolean("permission_center_v031_seen", true)
+                .apply()
             startOverlayService()
             showDashboard()
             Toast.makeText(this, "Основные разрешения настроены", Toast.LENGTH_SHORT).show()
