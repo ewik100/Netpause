@@ -9,6 +9,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.net.VpnService
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -21,6 +22,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.text.SimpleDateFormat
@@ -28,6 +30,11 @@ import java.util.Date
 import java.util.Locale
 
 class OverlayService : Service() {
+    companion object {
+        const val ACTION_HIDE = "ru.netpause.app.action.HIDE_FLOATING"
+        const val ACTION_SHUTDOWN = "ru.netpause.app.action.SHUTDOWN_ALL"
+    }
+
     private lateinit var wm: WindowManager
     private var bubble: View? = null
     private var panel: View? = null
@@ -35,10 +42,12 @@ class OverlayService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("netpause_state", MODE_PRIVATE) }
 
+    // The only periodic UI work is a tiny indicator refresh. VPN packet processing
+    // happens on its own blocking worker thread inside BlockVpnService.
     private val refresh = object : Runnable {
         override fun run() {
             updateBubble()
-            handler.postDelayed(this, 1000)
+            handler.postDelayed(this, 5000)
         }
     }
 
@@ -47,14 +56,34 @@ class OverlayService : Service() {
         startForeground(72, notification())
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         if (!Settings.canDrawOverlays(this)) {
+            prefs.edit().putBoolean("overlay_enabled", false).apply()
             stopSelf()
             return
         }
         createBubble()
-        handler.post(refresh)
+        handler.postDelayed(refresh, 5000)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_HIDE -> {
+                prefs.edit().putBoolean("overlay_enabled", false).apply()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_SHUTDOWN -> {
+                prefs.edit()
+                    .putBoolean("overlay_enabled", false)
+                    .putLong("active_until", 0L)
+                    .apply()
+                stopService(Intent(this, BlockVpnService::class.java))
+                stopSelf()
+                return START_NOT_STICKY
+            }
+        }
+        prefs.edit().putBoolean("overlay_enabled", true).apply()
+        return START_STICKY
+    }
 
     private fun notification(): Notification {
         if (Build.VERSION.SDK_INT >= 26) {
@@ -66,29 +95,34 @@ class OverlayService : Service() {
                 )
             )
         }
+
         val open = PendingIntent.getActivity(
             this, 72, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
         )
-        return if (Build.VERSION.SDK_INT >= 26) {
+        val shutdown = PendingIntent.getService(
+            this, 73, Intent(this, OverlayService::class.java).setAction(ACTION_SHUTDOWN),
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
+        )
+
+        val builder = if (Build.VERSION.SDK_INT >= 26) {
             Notification.Builder(this, "netpause_overlay")
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setContentTitle("NetPause работает")
-                .setContentText("Плавающая кнопка доступна поверх приложений")
-                .setContentIntent(open)
-                .setOngoing(true)
-                .build()
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setContentTitle("NetPause работает")
-                .setContentText("Плавающая кнопка доступна поверх приложений")
-                .setContentIntent(open)
-                .setOngoing(true)
-                .build()
         }
+
+        builder
+            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentTitle("NetPause работает")
+            .setContentText("Плавающая кнопка доступна поверх приложений")
+            .setContentIntent(open)
+            .setOngoing(true)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Выключить NetPause", shutdown)
+
+        return builder.build()
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -140,6 +174,7 @@ class OverlayService : Service() {
         try {
             wm.addView(b, bubbleParams)
         } catch (_: Exception) {
+            prefs.edit().putBoolean("overlay_enabled", false).apply()
             stopSelf()
         }
     }
@@ -180,11 +215,38 @@ class OverlayService : Service() {
     }
 
     private fun togglePanel() {
+        updateBubble()
         if (panel != null) closePanel() else openPanel()
+    }
+
+    private fun openMainForPermissions() {
+        try {
+            val intent = Intent(this, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_OPEN_PERMISSIONS, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            startActivity(intent)
+        } catch (_: Exception) {
+            Toast.makeText(this, "Открой NetPause и перейди в «Разрешения и производительность».", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun hideBubbleOnly() {
+        prefs.edit().putBoolean("overlay_enabled", false).apply()
+        stopSelf()
+    }
+
+    private fun shutdownEverything() {
+        prefs.edit()
+            .putBoolean("overlay_enabled", false)
+            .putLong("active_until", 0L)
+            .apply()
+        stopService(Intent(this, BlockVpnService::class.java))
+        stopSelf()
     }
 
     private fun openPanel() {
         if (panel != null) return
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(19), dp(17), dp(19), dp(17))
@@ -212,11 +274,14 @@ class OverlayService : Service() {
         top.addView(close)
         root.addView(top)
 
-        root.addView(text("БЫСТРОЕ УПРАВЛЕНИЕ ИНТЕРНЕТОМ", 10f, Color.LTGRAY, true).apply {
+        root.addView(text("ПЛАВАЮЩЕЕ УПРАВЛЕНИЕ", 10f, Color.LTGRAY, true).apply {
             setPadding(0, dp(4), 0, dp(12))
         })
 
-        root.addView(text("Сегодня осталось: " + (3 - usedToday()).coerceAtLeast(0) + " из 3 запусков", 12f, Color.rgb(180, 205, 230), true))
+        root.addView(text(
+            "Сегодня осталось: " + (3 - usedToday()).coerceAtLeast(0) + " из 3 запусков",
+            12f, Color.rgb(180, 205, 230), true
+        ))
         root.addView(text(statusText(), 13f, Color.WHITE, true).apply {
             setPadding(0, dp(12), 0, dp(10))
         })
@@ -228,7 +293,7 @@ class OverlayService : Service() {
         ).apply { setPadding(0, 0, 0, dp(10)) })
 
         val settings = Button(this).apply {
-            text = "НАСТРОИТЬ ПРИЛОЖЕНИЯ"
+            text = "ПОИСК И ВЫБОР ПРИЛОЖЕНИЙ"
             isAllCaps = false
             textSize = 12f
             setTextColor(Color.rgb(175, 230, 245))
@@ -238,7 +303,7 @@ class OverlayService : Service() {
                 try {
                     startActivity(
                         Intent(this@OverlayService, MainActivity::class.java)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     )
                 } catch (_: Exception) {
                     Toast.makeText(this@OverlayService, "Открой NetPause для выбора приложений", Toast.LENGTH_SHORT).show()
@@ -296,22 +361,23 @@ class OverlayService : Service() {
                     Toast.makeText(this@OverlayService, "Укажи от 1 до 120 минут", Toast.LENGTH_SHORT).show()
                 } else if (usedToday() >= 3) {
                     Toast.makeText(this@OverlayService, "На сегодня все 3 запуска использованы", Toast.LENGTH_LONG).show()
+                } else if (VpnService.prepare(this@OverlayService) != null) {
+                    Toast.makeText(this@OverlayService, "Сначала разреши VPN в центре разрешений. Само окно VPN не включает.", Toast.LENGTH_LONG).show()
+                    closePanel()
+                    openMainForPermissions()
                 } else {
                     prefs.edit().putInt("last_minutes", mins).apply()
                     incrementUsage()
-                    val until = System.currentTimeMillis() + mins * 60_000L
-                    prefs.edit().putLong("active_until", until).apply()
                     val service = Intent(this@OverlayService, BlockVpnService::class.java)
                         .putExtra(BlockVpnService.EXTRA_DURATION_MS, mins * 60_000L)
                     try {
                         if (Build.VERSION.SDK_INT >= 26) startForegroundService(service)
                         else startService(service)
                         closePanel()
-                        Toast.makeText(this@OverlayService, "Блокировка включена на $mins мин.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@OverlayService, "Запускаю блокировку на $mins мин.", Toast.LENGTH_SHORT).show()
                     } catch (_: Exception) {
-                        incrementUsageBack()
-                        prefs.edit().putLong("active_until", 0L).apply()
-                        Toast.makeText(this@OverlayService, "Не удалось включить VPN-блокировку", Toast.LENGTH_LONG).show()
+                        decrementUsage()
+                        Toast.makeText(this@OverlayService, "Не удалось запустить VPN. Проверь разрешение.", Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -327,35 +393,63 @@ class OverlayService : Service() {
                 stopService(Intent(this@OverlayService, BlockVpnService::class.java))
                 prefs.edit().putLong("active_until", 0L).apply()
                 closePanel()
-                Toast.makeText(this@OverlayService, "Блокировка остановлена", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@OverlayService, "VPN-блокировка отключена", Toast.LENGTH_SHORT).show()
             }
         }
         root.addView(stop, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(8) })
 
         root.addView(text(
-            "Выбранные приложения остаются онлайн. Остальные — без доступа к сети. Максимум 2 часа.",
+            "Выбранные приложения остаются онлайн. Остальные — без доступа к сети. Таймер максимум 2 часа.",
             10f, Color.LTGRAY
         ).apply { setPadding(0, dp(10), 0, 0) })
 
-        panel = root
+        root.addView(makeActionButton("СВЕРНУТЬ ПАНЕЛЬ", Color.rgb(36, 57, 91)) {
+            closePanel()
+        })
+        root.addView(makeActionButton("СКРЫТЬ ПЛАВАЮЩУЮ КНОПКУ", Color.rgb(58, 52, 72)) {
+            hideBubbleOnly()
+        })
+        root.addView(makeActionButton("ПОЛНОСТЬЮ ВЫКЛЮЧИТЬ NETPAUSE", Color.rgb(105, 40, 56)) {
+            shutdownEverything()
+        })
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(root)
+        }
+        panel = scroll
+
+        val maxHeight = (resources.displayMetrics.heightPixels - dp(70)).coerceAtLeast(dp(360))
         val panelParams = WindowManager.LayoutParams(
-            dp(326), WindowManager.LayoutParams.WRAP_CONTENT,
+            (resources.displayMetrics.widthPixels - dp(24)).coerceAtLeast(dp(280)),
+            maxHeight,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            y = dp(64)
+            y = dp(30)
         }
         try {
-            wm.addView(root, panelParams)
+            wm.addView(scroll, panelParams)
             bubble?.visibility = View.GONE
         } catch (_: Exception) {
             panel = null
             Toast.makeText(this, "Не удалось открыть окно поверх приложений", Toast.LENGTH_SHORT).show()
         }
     }
+
+    private fun makeActionButton(label: String, backgroundColor: Int, action: () -> Unit): Button =
+        Button(this).apply {
+            text = label
+            isAllCaps = false
+            textSize = 11f
+            setTextColor(Color.WHITE)
+            background = rounded(backgroundColor, 11)
+            setOnClickListener { action() }
+            layoutParams = LinearLayout.LayoutParams(-1, dp(39)).apply { topMargin = dp(7) }
+        }
 
     private fun closePanel() {
         panel?.let { try { wm.removeView(it) } catch (_: Exception) {} }
@@ -402,9 +496,8 @@ class OverlayService : Service() {
             .putInt("usage_count", usedToday() + 1).apply()
     }
 
-    private fun incrementUsageBack() {
-        val count = usedToday()
-        prefs.edit().putInt("usage_count", (count - 1).coerceAtLeast(0)).apply()
+    private fun decrementUsage() {
+        prefs.edit().putInt("usage_count", (usedToday() - 1).coerceAtLeast(0)).apply()
     }
 
     override fun onDestroy() {
