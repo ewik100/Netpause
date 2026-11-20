@@ -38,6 +38,7 @@ class OverlayService : Service() {
     private lateinit var wm: WindowManager
     private var bubble: View? = null
     private var panel: View? = null
+    private var panelStatus: TextView? = null
     private lateinit var bubbleParams: WindowManager.LayoutParams
     private val handler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("netpause_state", MODE_PRIVATE) }
@@ -47,7 +48,8 @@ class OverlayService : Service() {
     private val refresh = object : Runnable {
         override fun run() {
             updateBubble()
-            handler.postDelayed(this, 5000)
+            panelStatus?.text = statusText()
+            handler.postDelayed(this, 1000)
         }
     }
 
@@ -157,6 +159,7 @@ class OverlayService : Service() {
                 setStroke(dp(2), Color.WHITE)
             }
             elevation = dp(10).toFloat()
+            contentDescription = "NetPause: открыть плавающее меню"
             setOnTouchListener(BubbleTouch())
         }
         bubble = b
@@ -168,8 +171,8 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.END
-            x = dp(14)
-            y = dp(180)
+            x = prefs.getInt("bubble_x", dp(14)).coerceAtLeast(0)
+            y = prefs.getInt("bubble_y", dp(180)).coerceAtLeast(dp(24))
         }
         try {
             wm.addView(b, bubbleParams)
@@ -200,13 +203,30 @@ class OverlayService : Service() {
                     val dx = (downX - e.rawX).toInt()
                     val dy = (e.rawY - downY).toInt()
                     if (kotlin.math.abs(dx) + kotlin.math.abs(dy) > dp(6)) moved = true
-                    bubbleParams.x = (startX + dx).coerceAtLeast(0)
-                    bubbleParams.y = (startY + dy).coerceAtLeast(0)
+                    val maxX = (resources.displayMetrics.widthPixels - dp(58)).coerceAtLeast(0)
+                    val maxY = (resources.displayMetrics.heightPixels - dp(90)).coerceAtLeast(dp(24))
+                    bubbleParams.x = (startX + dx).coerceIn(0, maxX)
+                    bubbleParams.y = (startY + dy).coerceIn(dp(24), maxY)
                     try { wm.updateViewLayout(bubble, bubbleParams) } catch (_: Exception) {}
                     return true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!moved) togglePanel()
+                    if (moved) {
+                        prefs.edit()
+                            .putInt("bubble_x", bubbleParams.x)
+                            .putInt("bubble_y", bubbleParams.y)
+                            .apply()
+                    } else {
+                        v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                        togglePanel()
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    prefs.edit()
+                        .putInt("bubble_x", bubbleParams.x)
+                        .putInt("bubble_y", bubbleParams.y)
+                        .apply()
                     return true
                 }
             }
@@ -282,9 +302,10 @@ class OverlayService : Service() {
             "Сегодня осталось: " + (3 - usedToday()).coerceAtLeast(0) + " из 3 запусков",
             12f, Color.rgb(180, 205, 230), true
         ))
-        root.addView(text(statusText(), 13f, Color.WHITE, true).apply {
+        panelStatus = text(statusText(), 13f, Color.WHITE, true).apply {
             setPadding(0, dp(12), 0, dp(10))
-        })
+        }
+        root.addView(panelStatus)
 
         val allowedCount = prefs.getStringSet("allowed_apps", emptySet())?.size ?: 0
         root.addView(text(
@@ -454,6 +475,7 @@ class OverlayService : Service() {
     private fun closePanel() {
         panel?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         panel = null
+        panelStatus = null
         bubble?.visibility = View.VISIBLE
         updateBubble()
     }
