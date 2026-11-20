@@ -269,7 +269,7 @@ class OverlayService : Service() {
             .putBoolean("overlay_enabled", false)
             .putLong("active_until", 0L)
             .apply()
-        stopService(Intent(this, BlockVpnService::class.java))
+        BlockVpnService.requestStop(this)
         stopSelf()
     }
 
@@ -532,6 +532,8 @@ class OverlayService : Service() {
         closePanel()
         bubble?.let { try { wm.removeView(it) } catch (_: Exception) {} }
         bubble = null
+        if (Build.VERSION.SDK_INT >= 24) stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE)
+        getSystemService(NotificationManager::class.java).cancel(72)
         super.onDestroy()
     }
 
