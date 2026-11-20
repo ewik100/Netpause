@@ -15,6 +15,8 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.VpnService
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -31,8 +33,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 class MainActivity : Activity() {
@@ -44,7 +44,6 @@ class MainActivity : Activity() {
     private val notificationRequestCode = 4103
     private val prefs by lazy { getSharedPreferences("netpause_state", MODE_PRIVATE) }
 
-    private var permissionFlowRunning = false
     private var pendingPermissionStep: String? = null
 
     private data class LaunchApp(
@@ -74,23 +73,12 @@ class MainActivity : Activity() {
         super.onResume()
         clearExpiredBlockState()
         when (pendingPermissionStep) {
-            "overlay" -> {
-                pendingPermissionStep = null
-                if (Settings.canDrawOverlays(this)) {
-                    if (permissionFlowRunning) continuePermissionFlow() else showPermissionCenter()
-                } else {
-                    abortPermissionFlow("Разрешение отображения поверх окон пока не выдано.")
-                }
-            }
-            "battery" -> {
-                pendingPermissionStep = null
-                if (permissionFlowRunning) completePermissionFlow() else showPermissionCenter()
-            }
-            "manual_overlay", "manual_battery", "manual_poco" -> {
+            "manual_overlay", "manual_battery", "manual_poco", "manual_notifications" -> {
                 pendingPermissionStep = null
                 showPermissionCenter()
             }
-            "vpn", "notifications", "manual_notifications" -> Unit
+            "vpn" -> Unit // VPN consent returns through onActivityResult().
+            else -> Unit
         }
     }
 
@@ -101,7 +89,7 @@ class MainActivity : Activity() {
     private fun clearExpiredBlockState() {
         val until = prefs.getLong("active_until", 0L)
         if (until > 0L && until <= System.currentTimeMillis()) {
-            stopService(Intent(this, BlockVpnService::class.java))
+            BlockVpnService.requestStop(this)
             prefs.edit().putLong("active_until", 0L).apply()
         }
     }
@@ -146,6 +134,25 @@ class MainActivity : Activity() {
     private fun hasOverlayPermission(): Boolean = Settings.canDrawOverlays(this)
     private fun hasVpnPermission(): Boolean = VpnService.prepare(this) == null
 
+    private fun systemReportsActiveVpn(): Boolean {
+        return try {
+            val connectivity = getSystemService(ConnectivityManager::class.java)
+            val network = connectivity.activeNetwork ?: return false
+            val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun openSystemVpnSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
+        } catch (_: Exception) {
+            Toast.makeText(this, "Открой Android → Сеть и интернет → VPN.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun notificationsGranted(): Boolean =
         Build.VERSION.SDK_INT < 33 ||
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
@@ -159,18 +166,18 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this).apply { isFillViewport = true }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(30), dp(22), dp(26))
+            setPadding(dp(20), dp(26), dp(20), dp(24))
             background = pageBackground()
         }
         scroll.addView(root)
 
-        root.addView(makeText("NETPAUSE", 29f, Color.rgb(95, 230, 245), true))
-        root.addView(makeText("Центр разрешений", 20f, Color.WHITE, true).apply {
-            setPadding(0, dp(8), 0, dp(8))
+        root.addView(makeText("NETPAUSE", 27f, Color.rgb(95, 230, 245), true))
+        root.addView(makeText("Разрешения и работа в фоне", 19f, Color.WHITE, true).apply {
+            setPadding(0, dp(7), 0, dp(7))
         })
         root.addView(makeText(
-            "Здесь собраны настройки, которые Android и POCO требуют для плавающего окна и фоновой работы. Они не включают блокировку автоматически.",
-            13f, Color.LTGRAY
+            "Каждый доступ настраивается отдельно. Уже выданные разрешения повторно не запрашиваются. Само разрешение VPN не подключает телефон к VPN — соединение появляется только на время включённой блокировки.",
+            12f, Color.LTGRAY
         ).apply { setPadding(0, 0, 0, dp(14)) })
 
         if (!message.isNullOrBlank()) {
@@ -179,74 +186,109 @@ class MainActivity : Activity() {
             })
         }
 
+        val criticalReady = listOf(hasOverlayPermission(), hasVpnPermission()).count { it }
+        val optionalReady = listOf(notificationsGranted(), batteryUnrestricted()).count { it }
+        val summary = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(15), dp(13), dp(15), dp(13))
+            background = panelBackground()
+        }
+        summary.addView(makeText(
+            "ОСНОВНЫЕ ДОСТУПЫ: $criticalReady ИЗ 2",
+            13f, if (criticalReady == 2) Color.rgb(95, 225, 160) else Color.rgb(255, 195, 115), true
+        ))
+        summary.addView(makeText(
+            "Дополнительные настройки: $optionalReady из 2",
+            11f, Color.LTGRAY
+        ).apply { setPadding(0, dp(5), 0, 0) })
+        root.addView(summary, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(13) })
+
         addPermissionItem(
             root,
-            "1. Показ поверх других приложений",
-            "Нужно для плавающей кнопки NetPause.",
+            "1 · Плавающее окно",
+            "Нужно, чтобы кнопка NetPause отображалась поверх других приложений. Без этого можно пользоваться приложением из обычного окна.",
             hasOverlayPermission(),
-            "ОТКРЫТЬ НАСТРОЙКУ"
+            "РАЗРЕШИТЬ ОТОБРАЖЕНИЕ"
         ) { openOverlayPermission() }
 
         addPermissionItem(
             root,
-            "2. Разрешение VPN",
-            "Нужно только для запуска блокировки. Само по себе согласие VPN не включает.",
+            "2 · Разрешение локального VPN",
+            "Обязательное разрешение Android для фильтрации трафика. Оно не запускает соединение и не включает VPN само по себе.",
             hasVpnPermission(),
-            "ЗАПРОСИТЬ VPN"
+            "РАЗРЕШИТЬ VPN"
         ) { requestVpnPermission() }
 
         addPermissionItem(
             root,
-            "3. Уведомления",
-            "Показывают, что фоновый сервис активен, и дают быстрый способ его остановить.",
+            "3 · Уведомления",
+            "Показывают активную сессию и кнопку остановки. Можно разрешить отдельно; отказ не должен запускать повторные запросы.",
             notificationsGranted(),
             "РАЗРЕШИТЬ УВЕДОМЛЕНИЯ"
         ) { requestNotificationPermission() }
 
         addPermissionItem(
             root,
-            "4. Работа без ограничений батареи",
-            "Снижает вероятность остановки фонового сервиса системой.",
+            "4 · Работа без ограничений батареи",
+            "Помогает Android не завершать плавающее окно и таймер в фоне. Это дополнительная настройка, не разрешение VPN.",
             batteryUnrestricted(),
             "НАСТРОИТЬ БАТАРЕЮ"
         ) { requestBackgroundFreedom() }
 
         addPermissionItem(
             root,
-            "5. Питание, производительность и автозапуск POCO",
-            "Открой настройки NetPause. В разделе «Батарея» выбери «Нет ограничений», а в «Фоновом автозапуске» разреши запуск. Названия могут отличаться.",
-            false,
-            "ОТКРЫТЬ НАСТРОЙКИ POCO"
-        ) { openPocoAppSettings() }
+            "5 · Автозапуск и фон POCO",
+            "Это настройка оболочки телефона, а не отдельное разрешение Android. Инструкция покажет, где проверить автозапуск и режим «Нет ограничений».",
+            null,
+            "ПОКАЗАТЬ ИНСТРУКЦИЮ"
+        ) { showPocoGuide() }
 
-        root.addView(makeButton("ХОЧУ РАЗРЕШИТЬ  →") {
-            permissionFlowRunning = true
-            pendingPermissionStep = null
-            continuePermissionFlow()
-        }, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(8) })
+        val vpnStillActive = systemReportsActiveVpn() && prefs.getLong("active_until", 0L) <= System.currentTimeMillis()
+        if (vpnStillActive) {
+            val warning = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(15), dp(13), dp(15), dp(13))
+                background = GradientDrawable().apply {
+                    setColor(Color.rgb(65, 39, 48))
+                    cornerRadius = dp(16).toFloat()
+                    setStroke(dp(1), Color.rgb(190, 93, 105))
+                }
+            }
+            warning.addView(makeText("ANDROID СООБЩАЕТ ОБ АКТИВНОМ VPN", 12f, Color.rgb(255, 190, 190), true))
+            warning.addView(makeText(
+                "Блокировка NetPause сейчас не отмечена как активная, но система видит VPN-соединение. Проверь системные настройки VPN: отключи для NetPause режим «Всегда включён» и «Блокировать соединения без VPN», если они включены.",
+                12f, Color.LTGRAY
+            ).apply { setPadding(0, dp(6), 0, dp(9)) })
+            warning.addView(makeButton("ОТКРЫТЬ НАСТРОЙКИ VPN") { openSystemVpnSettings() },
+                LinearLayout.LayoutParams(-1, dp(43)))
+            root.addView(warning, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+        }
 
         root.addView(makeText(
-            "Кнопка откроет доступные системные экраны по очереди. Настройки автозапуска POCO подтверждаются вручную.",
-            11f, Color.LTGRAY
-        ).apply {
-            gravity = Gravity.CENTER
-            setPadding(0, dp(13), 0, 0)
-        })
+            "Системное VPN-соединение управляется Android. Если в настройках телефона всё ещё указано «Всегда включён» или включена блокировка без VPN, это нужно отключить в системном меню — обычное разрешение приложения не может менять этот защищённый переключатель.",
+            11f, Color.rgb(175, 195, 220)
+        ).apply { setPadding(dp(2), dp(8), dp(2), dp(12)) })
+
+        root.addView(makeButton("ОТКРЫТЬ СИСТЕМНЫЕ НАСТРОЙКИ VPN") {
+            openSystemVpnSettings()
+        }, LinearLayout.LayoutParams(-1, dp(46)))
 
         root.addView(makeButton("НАЗАД В NETPAUSE") {
-            permissionFlowRunning = false
             pendingPermissionStep = null
             showDashboard()
-        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(14) })
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
 
         setScreenContent(scroll)
+        root.alpha = 0f
+        root.translationY = dp(6).toFloat()
+        root.animate().alpha(1f).translationY(0f).setDuration(230L).start()
     }
 
     private fun addPermissionItem(
         root: LinearLayout,
         title: String,
         description: String,
-        granted: Boolean,
+        granted: Boolean?,
         actionText: String,
         action: () -> Unit
     ) {
@@ -255,82 +297,30 @@ class MainActivity : Activity() {
             setPadding(dp(15), dp(13), dp(15), dp(13))
             background = panelBackground()
         }
-        val state = if (granted) "✓ РАЗРЕШЕНО" else "НУЖНО ПРОВЕРИТЬ"
-        val stateColor = if (granted) Color.rgb(95, 225, 160) else Color.rgb(255, 195, 115)
+        val state = when (granted) {
+            true -> "✓ ГОТОВО"
+            false -> "НУЖНО РАЗРЕШИТЬ"
+            null -> "РУЧНАЯ НАСТРОЙКА"
+        }
+        val stateColor = when (granted) {
+            true -> Color.rgb(95, 225, 160)
+            false -> Color.rgb(255, 195, 115)
+            null -> Color.rgb(130, 200, 235)
+        }
         card.addView(makeText(title, 14f, Color.WHITE, true))
         card.addView(makeText(state, 10f, stateColor, true).apply {
-            setPadding(0, dp(4), 0, dp(4))
+            setPadding(0, dp(4), 0, dp(5))
         })
         card.addView(makeText(description, 12f, Color.LTGRAY).apply {
-            setPadding(0, 0, 0, dp(8))
+            setPadding(0, 0, 0, dp(9))
         })
-        card.addView(makeButton(actionText, action), LinearLayout.LayoutParams(-1, dp(42)))
+        val button = makeButton(if (granted == true) "УЖЕ ВКЛЮЧЕНО" else actionText, action)
+        if (granted == true) {
+            button.isEnabled = false
+            button.alpha = 0.55f
+        }
+        card.addView(button, LinearLayout.LayoutParams(-1, dp(42)))
         root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
-    }
-
-    private fun continuePermissionFlow() {
-        if (!hasOverlayPermission()) {
-            pendingPermissionStep = "overlay"
-            try {
-                startActivity(
-                    Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:$packageName")
-                    )
-                )
-            } catch (_: Exception) {
-                abortPermissionFlow("Не удалось открыть настройку отображения поверх окон.")
-            }
-            return
-        }
-
-        val vpnIntent = VpnService.prepare(this)
-        if (vpnIntent != null) {
-            pendingPermissionStep = "vpn"
-            startActivityForResult(vpnIntent, vpnRequestCode)
-            return
-        }
-
-        if (!notificationsGranted() && Build.VERSION.SDK_INT >= 33) {
-            pendingPermissionStep = "notifications"
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), notificationRequestCode)
-            return
-        }
-
-        if (!batteryUnrestricted()) {
-            pendingPermissionStep = "battery"
-            try {
-                startActivity(
-                    Intent(
-                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                        Uri.parse("package:$packageName")
-                    )
-                )
-            } catch (_: Exception) {
-                pendingPermissionStep = null
-                completePermissionFlow()
-            }
-            return
-        }
-
-        completePermissionFlow()
-    }
-
-    private fun abortPermissionFlow(message: String) {
-        permissionFlowRunning = false
-        pendingPermissionStep = null
-        showPermissionCenter(message)
-    }
-
-    private fun completePermissionFlow() {
-        permissionFlowRunning = false
-        pendingPermissionStep = null
-        prefs.edit()
-            .putBoolean("permission_flow_completed", true)
-            .putBoolean("permission_center_intro_seen", true)
-            .apply()
-        showDashboard()
-        Toast.makeText(this, "Проверка разрешений завершена. Плавающее окно запускается отдельно.", Toast.LENGTH_LONG).show()
     }
 
     private fun openOverlayPermission() {
