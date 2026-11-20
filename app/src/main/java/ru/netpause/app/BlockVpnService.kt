@@ -49,19 +49,31 @@ class BlockVpnService : VpnService() {
         }
 
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
 
         val duration = (intent?.getLongExtra(EXTRA_DURATION_MS, 30 * 60_000L)
             ?: 30 * 60_000L).coerceIn(1_000L, MAX_DURATION_MS)
         val reconfigure = intent?.getBooleanExtra(EXTRA_RECONFIGURE, false) == true
 
+        // Establish the VPN interface first. On Android 14+, VPN foreground
+        // services may use the systemExempted type only while the VPN is active.
         if (vpnInterface == null || reconfigure) {
             if (reconfigure) closeTunnel()
             if (!establishTunnel()) {
                 prefs.edit().putLong("active_until", 0L).apply()
-                stopSelf()
+                stopSelf(startId)
                 return START_NOT_STICKY
             }
+        }
+
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        } catch (_: Exception) {
+            // Fail open: never leave a tunnel running if foreground promotion
+            // is rejected by the OS or device policy.
+            prefs.edit().putLong("active_until", 0L).apply()
+            closeTunnel()
+            stopSelf(startId)
+            return START_NOT_STICKY
         }
 
         prefs.edit().putLong("active_until", System.currentTimeMillis() + duration).apply()
