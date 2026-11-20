@@ -25,9 +25,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 class OverlayService : Service() {
     companion object {
@@ -39,6 +36,7 @@ class OverlayService : Service() {
     private var bubble: View? = null
     private var panel: View? = null
     private var panelStatus: TextView? = null
+    private var lastBubbleActive: Boolean? = null
     private lateinit var bubbleParams: WindowManager.LayoutParams
     private val handler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("netpause_state", MODE_PRIVATE) }
@@ -78,7 +76,7 @@ class OverlayService : Service() {
                     .putBoolean("overlay_enabled", false)
                     .putLong("active_until", 0L)
                     .apply()
-                stopService(Intent(this, BlockVpnService::class.java))
+                BlockVpnService.requestStop(this)
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -146,8 +144,8 @@ class OverlayService : Service() {
 
     private fun createBubble() {
         val b = TextView(this).apply {
-            text = "N"
-            textSize = 22f
+            text = "NP"
+            textSize = 17f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             setTypeface(typeface, android.graphics.Typeface.BOLD)
@@ -310,7 +308,7 @@ class OverlayService : Service() {
         })
 
         root.addView(text(
-            "Сегодня осталось: " + (3 - usedToday()).coerceAtLeast(0) + " из 3 запусков",
+            "Запускай блокировку столько раз, сколько нужно.",
             12f, Color.rgb(180, 205, 230), true
         ))
         panelStatus = text(statusText(), 13f, Color.WHITE, true).apply {
@@ -391,15 +389,12 @@ class OverlayService : Service() {
                 val mins = input.text.toString().toIntOrNull()
                 if (mins == null || mins !in 1..120) {
                     Toast.makeText(this@OverlayService, "Укажи от 1 до 120 минут", Toast.LENGTH_SHORT).show()
-                } else if (usedToday() >= 3) {
-                    Toast.makeText(this@OverlayService, "На сегодня все 3 запуска использованы", Toast.LENGTH_LONG).show()
                 } else if (VpnService.prepare(this@OverlayService) != null) {
                     Toast.makeText(this@OverlayService, "Сначала разреши VPN в центре разрешений. Само окно VPN не включает.", Toast.LENGTH_LONG).show()
                     closePanel()
                     openMainForPermissions()
                 } else {
                     prefs.edit().putInt("last_minutes", mins).apply()
-                    incrementUsage()
                     val service = Intent(this@OverlayService, BlockVpnService::class.java)
                         .putExtra(BlockVpnService.EXTRA_DURATION_MS, mins * 60_000L)
                     try {
@@ -408,7 +403,6 @@ class OverlayService : Service() {
                         closePanel()
                         Toast.makeText(this@OverlayService, "Запускаю блокировку на $mins мин.", Toast.LENGTH_SHORT).show()
                     } catch (_: Exception) {
-                        decrementUsage()
                         Toast.makeText(this@OverlayService, "Не удалось запустить VPN. Проверь разрешение.", Toast.LENGTH_LONG).show()
                     }
                 }
@@ -505,7 +499,12 @@ class OverlayService : Service() {
     private fun updateBubble() {
         val b = bubble as? TextView ?: return
         val active = prefs.getLong("active_until", 0L) > System.currentTimeMillis()
-        b.text = if (active) "●" else "N"
+        b.text = if (active) "●" else "NP"
+        b.contentDescription = if (active) {
+            "NetPause: блокировка активна. Нажми, чтобы открыть управление."
+        } else {
+            "NetPause: открыть управление блокировкой."
+        }
         b.background = GradientDrawable(
             GradientDrawable.Orientation.TL_BR,
             if (active) intArrayOf(Color.rgb(0, 190, 130), Color.rgb(0, 120, 160))
@@ -514,26 +513,18 @@ class OverlayService : Service() {
             shape = GradientDrawable.OVAL
             setStroke(dp(2), Color.WHITE)
         }
-    }
-
-    private fun todayKey(): String = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
-
-    private fun usedToday(): Int {
-        val day = todayKey()
-        if (prefs.getString("usage_day", "") != day) {
-            prefs.edit().putString("usage_day", day).putInt("usage_count", 0).apply()
-            return 0
+        if (lastBubbleActive != active) {
+            lastBubbleActive = active
+            b.animate().cancel()
+            b.animate()
+                .scaleX(0.88f)
+                .scaleY(0.88f)
+                .setDuration(100L)
+                .withEndAction {
+                    b.animate().scaleX(1f).scaleY(1f).setDuration(190L).start()
+                }
+                .start()
         }
-        return prefs.getInt("usage_count", 0)
-    }
-
-    private fun incrementUsage() {
-        prefs.edit().putString("usage_day", todayKey())
-            .putInt("usage_count", usedToday() + 1).apply()
-    }
-
-    private fun decrementUsage() {
-        prefs.edit().putInt("usage_count", (usedToday() - 1).coerceAtLeast(0)).apply()
     }
 
     override fun onDestroy() {
