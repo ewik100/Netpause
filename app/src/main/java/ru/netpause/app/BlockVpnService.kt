@@ -55,8 +55,8 @@ class BlockVpnService : VpnService() {
             // Record system-managed VPN modes so the app can explain why
             // Android may restart a VPN independently of the in-app timer.
             prefs.edit()
-                .putBoolean("system_vpn_always_on", isAlwaysOn)
-                .putBoolean("system_vpn_lockdown", isLockdownEnabled)
+                .putBoolean("system_vpn_always_on", isAlwaysOn())
+                .putBoolean("system_vpn_lockdown", isLockdownEnabled())
                 .apply()
         }
     }
@@ -76,6 +76,17 @@ class BlockVpnService : VpnService() {
         // previous service. Never create a blocking tunnel from a system restart:
         // every blocking session must carry the user's explicit duration.
         if (intent == null) {
+            clearAndDisconnect()
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+
+        // Only app actions carrying an explicit duration may create a tunnel.
+        // This prevents an accidental default-length block on unexpected starts.
+        if (intent.action != ACTION_STOP &&
+            !intent.hasExtra(EXTRA_DURATION_MS) &&
+            !intent.getBooleanExtra(EXTRA_RECONFIGURE, false)
+        ) {
             clearAndDisconnect()
             stopSelfResult(startId)
             return START_NOT_STICKY
