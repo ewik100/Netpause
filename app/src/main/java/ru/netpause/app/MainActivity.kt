@@ -522,6 +522,24 @@ class MainActivity : Activity() {
         showDashboard()
     }
 
+    private fun startSession(minutes: Int) {
+        val safeMinutes = minutes.coerceIn(1, 120)
+        if (!hasVpnPermission()) {
+            showPermissionCenter("Сначала разреши локальный VPN. Это не включает блокировку.")
+            return
+        }
+        prefs.edit().putInt("last_minutes", safeMinutes).apply()
+        val vpn = Intent(this, BlockVpnService::class.java)
+            .putExtra(BlockVpnService.EXTRA_DURATION_MS, safeMinutes * 60_000L)
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(vpn) else startService(vpn)
+            Toast.makeText(this, "Блокировка запущена на $safeMinutes мин.", Toast.LENGTH_SHORT).show()
+            showDashboard()
+        } catch (_: Exception) {
+            Toast.makeText(this, "Не удалось запустить блокировку. Проверь разрешения VPN.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun stopVpnOnly() {
         // Clear the visible state first, then stop the VPN service itself.
         prefs.edit().putLong("active_until", 0L).apply()
@@ -574,8 +592,6 @@ class MainActivity : Activity() {
         val vpnUntil = prefs.getLong("active_until", 0L)
         val blockActive = vpnUntil > now
         val remainingMs = (vpnUntil - now).coerceAtLeast(0L)
-        val totalMs = prefs.getInt("last_minutes", 30).coerceIn(1, 120) * 60_000L
-        val progress = if (blockActive) (remainingMs.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f) else 0f
         val remainingSeconds = remainingMs / 1000L
         val timeLabel = String.format(
             Locale.US,
@@ -583,24 +599,26 @@ class MainActivity : Activity() {
             remainingSeconds / 60L,
             remainingSeconds % 60L
         )
+        var selectedMinutes = prefs.getInt("last_minutes", 30).coerceIn(1, 120)
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             clipToPadding = false
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
         }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(26), dp(20), dp(24))
+            setPadding(dp(18), dp(20), dp(18), dp(26))
             background = pageBackground()
         }
         scroll.addView(root)
 
-        // Brand header with a custom animated identity mark.
+        // Compact brand header.
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val avatar = TextView(this).apply {
+        val logo = TextView(this).apply {
             text = "NP"
             textSize = 17f
             gravity = Gravity.CENTER
@@ -613,85 +631,154 @@ class MainActivity : Activity() {
                 shape = GradientDrawable.OVAL
                 setStroke(dp(2), Color.rgb(115, 235, 245))
             }
-            elevation = dp(8).toFloat()
+            elevation = dp(5).toFloat()
             contentDescription = "Логотип NetPause"
         }
-        header.addView(avatar, LinearLayout.LayoutParams(dp(54), dp(54)).apply {
-            marginEnd = dp(13)
+        header.addView(logo, LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+            marginEnd = dp(11)
         })
-        val brandText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        brandText.addView(makeText("NETPAUSE", 24f, Color.WHITE, true))
-        brandText.addView(makeText("Цифровой фокус под твоим контролем", 11f, Color.rgb(165, 190, 220)))
-        header.addView(brandText, LinearLayout.LayoutParams(0, -2, 1f))
+
+        val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        brand.addView(makeText("NETPAUSE", 21f, Color.WHITE, true))
+        brand.addView(makeText("Контроль интернет-доступа", 11f, Color.rgb(165, 190, 220)))
+        header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+
         val version = TextView(this).apply {
-            text = "1.1"
+            text = "v1.3"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(Color.rgb(115, 235, 230))
             background = roundedVersionBadge()
-            setPadding(dp(11), dp(7), dp(11), dp(7))
+            setPadding(dp(10), dp(7), dp(10), dp(7))
         }
         header.addView(version)
         root.addView(header)
 
         root.addView(makeText(
-            "Управляй доступом к интернету без лишних действий.",
-            13f,
-            Color.LTGRAY
-        ).apply { setPadding(0, dp(15), 0, dp(17)) })
+            "Все основные действия — на одном экране.",
+            13f, Color.rgb(190, 205, 225)
+        ).apply { setPadding(0, dp(13), 0, dp(15)) })
 
-        // Main status visualization.
+        // Main status card.
         val hero = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(13), dp(17), dp(13), dp(17))
-            background = panelBackground()
-            elevation = dp(4).toFloat()
+            setPadding(dp(12), dp(14), dp(13), dp(14))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.rgb(18, 31, 57), Color.rgb(28, 48, 82))
+            ).apply {
+                cornerRadius = dp(22).toFloat()
+                setStroke(dp(1), Color.rgb(66, 110, 164))
+            }
+            elevation = dp(3).toFloat()
         }
+        val progress = if (blockActive) {
+            val total = prefs.getInt("last_minutes", 30).coerceIn(1, 120) * 60_000L
+            (remainingMs.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+        } else 0f
         hero.addView(
             StatusOrbitView(blockActive, progress),
-            LinearLayout.LayoutParams(dp(132), dp(132)).apply { marginEnd = dp(10) }
+            LinearLayout.LayoutParams(dp(112), dp(112)).apply { marginEnd = dp(12) }
         )
         val heroInfo = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
         }
         heroInfo.addView(makeText(
-            if (blockActive) "БЛОКИРОВКА АКТИВНА" else "ГОТОВ К ФОКУСУ",
+            if (blockActive) "СЕССИЯ ИДЁТ" else "СИСТЕМА ГОТОВА",
             11f,
-            if (blockActive) Color.rgb(100, 230, 165) else Color.rgb(105, 225, 235),
+            if (blockActive) Color.rgb(100, 230, 165) else Color.rgb(100, 225, 235),
             true
         ))
         heroInfo.addView(makeText(
-            if (blockActive) timeLabel else "VPN выключен",
-            25f,
+            if (blockActive) timeLabel else "VPN отключён",
+            if (blockActive) 27f else 21f,
             Color.WHITE,
             true
-        ).apply { setPadding(0, dp(6), 0, dp(4)) })
+        ).apply { setPadding(0, dp(5), 0, dp(4)) })
         heroInfo.addView(makeText(
-            if (blockActive) "Осталось до автоматического отключения"
-            else "Нажми «Начать блокировку» в плавающем окне. VPN включится только на это время.",
-            11f,
-            Color.LTGRAY
+            if (blockActive) "До автоматической остановки"
+            else "Подключение появится только после твоего запуска.",
+            11f, Color.rgb(190, 205, 225)
         ))
-        if (blockActive) {
-            heroInfo.addView(makeButton("ОСТАНОВИТЬ VPN") {
-                stopVpnOnly()
-                showDashboard()
-            }, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(10) })
-        } else {
-            heroInfo.addView(makeText(
-                if (overlayRunning) "Плавающая кнопка уже запущена"
-                else "Плавающая кнопка пока выключена",
-                10f,
-                Color.rgb(145, 190, 215),
-                true
-            ).apply { setPadding(0, dp(9), 0, 0) })
-        }
         hero.addView(heroInfo, LinearLayout.LayoutParams(0, -2, 1f))
         root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
 
-        // A compact live summary, so limits are visible without opening settings.
+        if (blockActive) {
+            root.addView(makeButton("ОСТАНОВИТЬ БЛОКИРОВКУ") {
+                stopVpnOnly()
+                showDashboard()
+            }, LinearLayout.LayoutParams(-1, dp(50)).apply { bottomMargin = dp(14) })
+        } else {
+            val durationCard = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(15), dp(14), dp(15), dp(14))
+                background = panelBackground()
+            }
+            durationCard.addView(makeText("ДЛИТЕЛЬНОСТЬ СЕССИИ", 12f, Color.rgb(115, 230, 240), true))
+            durationCard.addView(makeText(
+                "Выбери время — максимум 120 минут. Число запусков не ограничено.",
+                11f, Color.LTGRAY
+            ).apply { setPadding(0, dp(5), 0, dp(11)) })
+
+            val presets = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            val chips = ArrayList<TextView>()
+            fun updatePresetStyle() {
+                chips.forEach { chip ->
+                    val value = chip.tag as Int
+                    val selected = value == selectedMinutes
+                    chip.background = GradientDrawable().apply {
+                        setColor(if (selected) Color.rgb(0, 145, 170) else Color.rgb(35, 51, 80))
+                        cornerRadius = dp(11).toFloat()
+                        setStroke(
+                            dp(1),
+                            if (selected) Color.rgb(100, 230, 240) else Color.rgb(67, 91, 130)
+                        )
+                    }
+                    chip.setTextColor(if (selected) Color.WHITE else Color.rgb(205, 218, 236))
+                }
+            }
+            listOf(15, 30, 45, 60, 90, 120).forEach { value ->
+                val chip = TextView(this).apply {
+                    text = value.toString()
+                    tag = value
+                    textSize = 12f
+                    gravity = Gravity.CENTER
+                    setPadding(dp(1), dp(11), dp(1), dp(11))
+                    minWidth = dp(39)
+                    contentDescription = "$value минут"
+                }
+                chips.add(chip)
+                presets.addView(chip, LinearLayout.LayoutParams(0, dp(42), 1f).apply {
+                    setMargins(dp(2), 0, dp(2), 0)
+                })
+            }
+            updatePresetStyle()
+            durationCard.addView(presets)
+            val startButton = makeButton("НАЧАТЬ БЛОКИРОВКУ  ·  " + selectedMinutes + " МИН") {
+                startSession(selectedMinutes)
+            }
+            durationCard.addView(startButton, LinearLayout.LayoutParams(-1, dp(49)).apply {
+                topMargin = dp(12)
+            })
+            chips.forEach { chip ->
+                chip.setOnClickListener {
+                    selectedMinutes = chip.tag as Int
+                    prefs.edit().putInt("last_minutes", selectedMinutes).apply()
+                    updatePresetStyle()
+                    startButton.text = "НАЧАТЬ БЛОКИРОВКУ  ·  " + selectedMinutes + " МИН"
+                }
+            }
+            root.addView(durationCard, LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(14)
+            })
+        }
+
+        // Three compact status tiles.
         val metrics = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -700,97 +787,100 @@ class MainActivity : Activity() {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                setPadding(dp(7), dp(12), dp(7), dp(12))
+                setPadding(dp(5), dp(11), dp(5), dp(11))
                 background = GradientDrawable().apply {
                     setColor(Color.rgb(20, 34, 61))
-                    cornerRadius = dp(15).toFloat()
+                    cornerRadius = dp(14).toFloat()
                     setStroke(dp(1), Color.rgb(48, 76, 119))
                 }
             }
-            card.addView(makeText(value, 19f, Color.WHITE, true))
-            card.addView(makeText(caption, 10f, Color.LTGRAY).apply {
+            card.addView(makeText(value, 18f, Color.WHITE, true))
+            card.addView(makeText(caption, 9f, Color.LTGRAY).apply {
                 gravity = Gravity.CENTER
                 setPadding(0, dp(3), 0, 0)
             })
             return card
         }
-        metrics.addView(metric("∞", "без лимита запусков"),
+        metrics.addView(metric("∞", "запусков"),
             LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
-        metrics.addView(metric("120 мин", "макс. таймер сессии"),
+        metrics.addView(metric("120 мин", "за сессию"),
             LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
         metrics.addView(metric(allowedCount.toString(), "исключений"),
             LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(metrics, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
+        root.addView(metrics, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
 
-        fun addSection(title: String, description: String, buttonText: String, action: () -> Unit) {
+        // Reusable action card.
+        fun addActionCard(
+            title: String,
+            detail: String,
+            actionTitle: String,
+            action: () -> Unit
+        ) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(17), dp(15), dp(17), dp(15))
+                setPadding(dp(15), dp(14), dp(15), dp(14))
                 background = panelBackground()
-                alpha = 0f
-                translationY = dp(8).toFloat()
             }
-            card.addView(makeText(title, 15f, Color.WHITE, true))
-            card.addView(makeText(description, 12f, Color.LTGRAY).apply {
-                setPadding(0, dp(6), 0, dp(10))
+            card.addView(makeText(title, 14f, Color.WHITE, true))
+            card.addView(makeText(detail, 11f, Color.LTGRAY).apply {
+                setPadding(0, dp(5), 0, dp(10))
             })
-            card.addView(makeButton(buttonText, action), LinearLayout.LayoutParams(-1, dp(46)))
+            val actionButton = makeButton(actionTitle, action)
+            card.addView(actionButton, LinearLayout.LayoutParams(-1, dp(44)))
             root.addView(card, LinearLayout.LayoutParams(-1, -2).apply {
-                bottomMargin = dp(12)
+                bottomMargin = dp(10)
             })
-            card.animate()
-                .alpha(1f)
-                .translationY(0f)
-                .setStartDelay((root.childCount * 35L).coerceAtMost(280L))
-                .setDuration(260L)
-                .start()
         }
 
-        addSection(
+        addActionCard(
             "ПРИЛОЖЕНИЯ С ИНТЕРНЕТОМ",
-            "Выбери приложения, которым нужно оставить сеть во время блокировки. Список сохраняется и доступен для изменения в любое время.",
-            "ПОИСК И ВЫБОР ПРИЛОЖЕНИЙ"
+            "Выбери программы, которым разрешено оставаться онлайн во время блокировки. Список хранится на этом телефоне.",
+            "НАСТРОИТЬ ИСКЛЮЧЕНИЯ"
         ) { showAppPicker() }
 
-        addSection(
-            "ПЛАВАЮЩЕЕ ОКНО",
-            if (overlayRunning) "Кнопка NetPause работает поверх приложений. Её можно перемещать и открывать в любой момент. Скрытие окна не отключает VPN."
-            else "Запускает небольшую кнопку поверх приложений. Сам VPN при этом остаётся выключенным.",
-            if (overlayRunning) "СКРЫТЬ ПЛАВАЮЩУЮ КНОПКУ" else "ЗАПУСТИТЬ ПЛАВАЮЩУЮ КНОПКУ"
+        addActionCard(
+            "ПЛАВАЮЩЕЕ УПРАВЛЕНИЕ",
+            if (overlayRunning) {
+                "Кнопка NP включена. Через неё можно открыть панель управления поверх других приложений."
+            } else {
+                "Показывает кнопку NP поверх приложений. Запуск плавающего окна сам по себе не включает VPN."
+            },
+            if (overlayRunning) "СКРЫТЬ КНОПКУ NP" else "ВКЛЮЧИТЬ КНОПКУ NP"
         ) {
-            if (overlayRunning) stopOverlayService() else startOverlayService()
+            if (overlayRunning) stopOverlayService() else {
+                startOverlayService()
+                showDashboard()
+            }
         }
 
-        addSection(
+        addActionCard(
             "РАЗРЕШЕНИЯ И РАБОТА В ФОНЕ",
-            "Проверка разрешений Android, настроек батареи и автозапуска POCO. Эти настройки не включают блокировку.",
+            "Отдельная проверка разрешений Android, уведомлений, батареи и настроек POCO.",
             "ОТКРЫТЬ ЦЕНТР РАЗРЕШЕНИЙ"
         ) { showPermissionCenter() }
 
-        addSection(
-            "О NETPAUSE И ПРИВАТНОСТИ",
-            "Что приложение делает с сетевым трафиком, какие данные хранит и какие ограничения важно знать.",
-            "ПРОЧИТАТЬ"
+        addActionCard(
+            "О ПРИЛОЖЕНИИ И ДАННЫХ",
+            "Настройки, длительность и исключения хранятся локально. Аккаунт и собственный сервер не используются.",
+            "ОТКРЫТЬ ИНФОРМАЦИЮ"
         ) { showAbout() }
 
         root.addView(makeButton("ПОЛНОСТЬЮ ВЫКЛЮЧИТЬ NETPAUSE") {
             shutdownNetPause()
-        }, LinearLayout.LayoutParams(-1, dp(49)).apply { topMargin = dp(3) })
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(2) })
 
         root.addView(makeText(
-            "NETPAUSE 1.1  •  Без лимита запусков  •  До 120 минут за сессию",
-            10f,
-            Color.rgb(145, 170, 200)
+            "Настройки сохраняются на устройстве при совместимом обновлении приложения.",
+            10f, Color.rgb(150, 174, 204)
         ).apply {
             gravity = Gravity.CENTER
-            setPadding(0, dp(18), 0, dp(4))
+            setPadding(dp(6), dp(16), dp(6), dp(4))
         })
 
         setScreenContent(scroll)
         root.alpha = 0f
-        root.translationY = dp(7).toFloat()
-        root.animate().alpha(1f).translationY(0f).setDuration(280L).start()
-        avatar.animate().rotationBy(3f).setDuration(1400L).start()
+        root.translationY = dp(6).toFloat()
+        root.animate().alpha(1f).translationY(0f).setDuration(240L).start()
     }
 
     private fun roundedVersionBadge(): GradientDrawable = GradientDrawable().apply {
@@ -807,7 +897,7 @@ class MainActivity : Activity() {
             background = pageBackground()
         }
         scroll.addView(root)
-        root.addView(makeText("NETPAUSE 1.1", 26f, Color.rgb(100, 230, 240), true))
+        root.addView(makeText("NETPAUSE 1.3", 26f, Color.rgb(100, 230, 240), true))
         root.addView(makeText("Локальный инструмент цифрового фокуса", 14f, Color.WHITE, true)
             .apply { setPadding(0, dp(7), 0, dp(15)) })
 
@@ -816,7 +906,7 @@ class MainActivity : Activity() {
             "ИСКЛЮЧЕНИЯ" to "Приложения из списка исключений обходят локальный VPN и сохраняют доступ к интернету. Список хранится на устройстве и может быть изменён в любое время.",
             "ПРИВАТНОСТЬ" to "В этой версии нет аккаунта и собственного сервера. NetPause не отправляет историю использования на сервер. Само приложение не анализирует содержимое трафика.",
             "ВАЖНО" to "Пока блокировка включена, интернет у остальных приложений недоступен. При проблемах останови VPN кнопкой в NetPause или системным переключателем VPN. Поведение нужно проверить на конкретной версии Android и оболочке POCO.",
-            "СТАТУС ВЕРСИИ" to "Версия 1.1 предназначена для тестирования. Перед публикацией в Google Play необходимы отдельная проверка совместимости, корректная подпись релизной сборки, политика конфиденциальности и проверка соответствия правилам магазина."
+            "СТАТУС ВЕРСИИ" to "Версия 1.3 предназначена для тестирования. Перед публикацией в Google Play необходимы отдельная проверка совместимости, корректная подпись релизной сборки, политика конфиденциальности и проверка соответствия правилам магазина."
         )
         notes.forEach { (heading, body) ->
             val card = LinearLayout(this).apply {
