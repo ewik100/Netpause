@@ -18,6 +18,7 @@ class BlockVpnService : VpnService() {
     companion object {
         const val EXTRA_DURATION_MS = "duration_ms"
         const val EXTRA_RECONFIGURE = "reconfigure"
+        const val ACTION_STOP = "ru.netpause.app.action.STOP_VPN"
         private const val CHANNEL_ID = "netpause_block"
         private const val NOTIFICATION_ID = 71
         private const val MAX_DURATION_MS = 120L * 60_000L
@@ -27,34 +28,37 @@ class BlockVpnService : VpnService() {
     private var readerThread: Thread? = null
     private var readerStopSignal: AtomicBoolean? = null
     private val handler = Handler(Looper.getMainLooper())
+    private val prefs by lazy { getSharedPreferences("netpause_state", MODE_PRIVATE) }
     private val stopRunnable = Runnable {
-        getSharedPreferences("netpause_state", MODE_PRIVATE)
-            .edit().putLong("active_until", 0L).apply()
+        prefs.edit().putLong("active_until", 0L).apply()
         stopSelf()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, buildNotification())
+
+        if (intent?.action == ACTION_STOP) {
+            prefs.edit().putLong("active_until", 0L).apply()
+            handler.removeCallbacks(stopRunnable)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         val duration = (intent?.getLongExtra(EXTRA_DURATION_MS, 30 * 60_000L)
             ?: 30 * 60_000L).coerceIn(1_000L, MAX_DURATION_MS)
         val reconfigure = intent?.getBooleanExtra(EXTRA_RECONFIGURE, false) == true
 
-        createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
-
         if (vpnInterface == null || reconfigure) {
             if (reconfigure) closeTunnel()
             if (!establishTunnel()) {
-                getSharedPreferences("netpause_state", MODE_PRIVATE)
-                    .edit().putLong("active_until", 0L).apply()
+                prefs.edit().putLong("active_until", 0L).apply()
                 stopSelf()
                 return START_NOT_STICKY
             }
         }
 
-        val activeUntil = System.currentTimeMillis() + duration
-        getSharedPreferences("netpause_state", MODE_PRIVATE)
-            .edit().putLong("active_until", activeUntil).apply()
-
+        prefs.edit().putLong("active_until", System.currentTimeMillis() + duration).apply()
         handler.removeCallbacks(stopRunnable)
         handler.postDelayed(stopRunnable, duration)
         return START_NOT_STICKY
@@ -64,26 +68,24 @@ class BlockVpnService : VpnService() {
         val builder = Builder()
             .setSession("NetPause — блокировка интернета")
             .setMtu(1500)
-            // FileInputStream reads this descriptor on a worker thread.
-            // Android defaults to non-blocking; blocking mode prevents EAGAIN
-            // from terminating the reader when no packet is ready.
+            // Blocking mode is important: a non-blocking read can return EAGAIN
+            // when the VPN queue is momentarily empty.
             .setBlocking(true)
             .addAddress("10.77.0.1", 32)
             .addRoute("0.0.0.0", 0)
             .addAddress("fd77:7777::1", 128)
             .addRoute("::", 0)
 
-        val allowedApps = getSharedPreferences("netpause_state", MODE_PRIVATE)
-            .getStringSet("allowed_apps", emptySet())?.toSet() ?: emptySet()
+        val allowedApps = prefs.getStringSet("allowed_apps", emptySet())?.toSet() ?: emptySet()
 
-        // Option B: these apps bypass the VPN and keep their normal internet.
-        // All other apps are routed into this VPN and their packets are discarded.
-        for (packageName in allowedApps) {
-            if (packageName == this.packageName) continue
+        // Option B: selected apps bypass the VPN. All remaining apps are routed
+        // into this VPN; their packets are intentionally not forwarded.
+        val exclusions = allowedApps + packageName
+        for (appPackage in exclusions) {
             try {
-                builder.addDisallowedApplication(packageName)
+                builder.addDisallowedApplication(appPackage)
             } catch (_: Exception) {
-                // Ignore removed apps or packages no longer installed.
+                // Ignore a package if it has been removed or is not installed.
             }
         }
 
@@ -113,11 +115,11 @@ class BlockVpnService : VpnService() {
                     while (!stopSignal.get()) {
                         val count = input.read(buffer)
                         if (count < 0) break
-                        // Deliberately do not write packets back to the network.
+                        // Do not write the packets back: they remain blocked.
                     }
                 }
             } catch (_: Exception) {
-                // Closing the VPN descriptor during stop/reconfiguration is expected.
+                // Closing the descriptor on stop/reconfiguration is expected.
             }
         }.apply {
             name = "NetPause-PacketDrop"
@@ -144,24 +146,27 @@ class BlockVpnService : VpnService() {
             PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
         )
-        return if (Build.VERSION.SDK_INT >= 26) {
+        val stop = PendingIntent.getService(
+            this, 1, Intent(this, BlockVpnService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
+        )
+
+        val builder = if (Build.VERSION.SDK_INT >= 26) {
             Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("NetPause")
-                .setContentText("Интернет заблокирован по таймеру")
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setContentIntent(openApp)
-                .setOngoing(true)
-                .build()
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
-                .setContentTitle("NetPause")
-                .setContentText("Интернет заблокирован по таймеру")
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setContentIntent(openApp)
-                .setOngoing(true)
-                .build()
         }
+
+        return builder
+            .setContentTitle("NetPause — блокировка активна")
+            .setContentText("Выбранные приложения остаются в сети. Нажми «Остановить», чтобы вернуть интернет.")
+            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentIntent(openApp)
+            .setOngoing(true)
+            .addAction(android.R.drawable.ic_media_pause, "Остановить", stop)
+            .build()
     }
 
     private fun createNotificationChannel() {
@@ -177,9 +182,18 @@ class BlockVpnService : VpnService() {
         }
     }
 
+    override fun onRevoke() {
+        handler.removeCallbacks(stopRunnable)
+        prefs.edit().putLong("active_until", 0L).apply()
+        closeTunnel()
+        super.onRevoke()
+    }
+
     override fun onDestroy() {
         handler.removeCallbacks(stopRunnable)
+        prefs.edit().putLong("active_until", 0L).apply()
         closeTunnel()
+        if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
