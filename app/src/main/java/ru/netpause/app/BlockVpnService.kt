@@ -49,6 +49,18 @@ class BlockVpnService : VpnService() {
         stopSelf()
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        if (Build.VERSION.SDK_INT >= 29) {
+            // Record system-managed VPN modes so the app can explain why
+            // Android may restart a VPN independently of the in-app timer.
+            prefs.edit()
+                .putBoolean("system_vpn_always_on", isAlwaysOn)
+                .putBoolean("system_vpn_lockdown", isLockdownEnabled)
+                .apply()
+        }
+    }
+
     private fun clearAndDisconnect() {
         handler.removeCallbacks(stopRunnable)
         prefs.edit().putLong("active_until", 0L).apply()
@@ -60,6 +72,15 @@ class BlockVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // A null intent can be delivered when Android tries to restore a
+        // previous service. Never create a blocking tunnel from a system restart:
+        // every blocking session must carry the user's explicit duration.
+        if (intent == null) {
+            clearAndDisconnect()
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+
         // Handle the stop command before entering foreground mode. Closing the
         // descriptor releases Android's VPN interface immediately; removing
         // foreground state also removes the persistent VPN notification.
