@@ -27,7 +27,6 @@ jobs:
           gradle-version: "8.11.1"
 
       - name: Prepare persistent signing key
-        if: ${{ secrets.NETPAUSE_KEYSTORE_BASE64 != '' }}
         shell: bash
         run: |
           printf '%s' "$NETPAUSE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/netpause-signing.p12"
