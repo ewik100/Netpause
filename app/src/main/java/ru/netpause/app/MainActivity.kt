@@ -539,7 +539,7 @@ class MainActivity : Activity() {
             shutdownNetPause()
         }), LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(2) })
 
-        root.addView(makeText("NetPause 0.4 · Таймер до 120 минут · До 3 запусков в день", 11f, Color.LTGRAY).apply {
+        root.addView(makeText("NetPause 0.5 · Таймер до 120 минут · До 3 запусков в день", 11f, Color.LTGRAY).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(20), 0, 0)
         })
