@@ -248,7 +248,9 @@ class MainActivity : Activity() {
         ) { showPocoGuide() }
 
         val vpnStillActive = systemReportsActiveVpn() && prefs.getLong("active_until", 0L) <= System.currentTimeMillis()
-        if (vpnStillActive) {
+        val alwaysOnConfigured = prefs.getBoolean("system_vpn_always_on", false)
+        val lockdownConfigured = prefs.getBoolean("system_vpn_lockdown", false)
+        if (vpnStillActive || alwaysOnConfigured || lockdownConfigured) {
             val warning = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(15), dp(13), dp(15), dp(13))
@@ -258,11 +260,24 @@ class MainActivity : Activity() {
                     setStroke(dp(1), Color.rgb(190, 93, 105))
                 }
             }
-            warning.addView(makeText("ANDROID СООБЩАЕТ ОБ АКТИВНОМ VPN", 12f, Color.rgb(255, 190, 190), true))
             warning.addView(makeText(
-                "Блокировка NetPause сейчас не отмечена как активная, но система видит VPN-соединение. Проверь системные настройки VPN: отключи для NetPause режим «Всегда включён» и «Блокировать соединения без VPN», если они включены.",
-                12f, Color.LTGRAY
-            ).apply { setPadding(0, dp(6), 0, dp(9)) })
+                if (alwaysOnConfigured || lockdownConfigured) "ПРОВЕРЬ СИСТЕМНЫЙ РЕЖИМ VPN"
+                else "ANDROID СООБЩАЕТ ОБ АКТИВНОМ VPN",
+                12f, Color.rgb(255, 190, 190), true
+            ))
+            val warningBody = when {
+                alwaysOnConfigured && lockdownConfigured ->
+                    "Для NetPause обнаружены режимы «Всегда включён» и «Блокировать соединения без VPN». Отключи оба переключателя в системных настройках VPN. Иначе Android может удерживать или перезапускать VPN независимо от кнопки приложения."
+                alwaysOnConfigured ->
+                    "Для NetPause обнаружен режим «Всегда включён». Отключи его в системных настройках VPN, чтобы соединение не запускалось системой самостоятельно."
+                lockdownConfigured ->
+                    "Для NetPause обнаружена системная блокировка без VPN. Отключи её в системных настройках VPN, иначе Android может сохранять сетевое ограничение даже после остановки приложения."
+                else ->
+                    "Блокировка NetPause не отмечена как активная, но Android всё ещё сообщает об активном VPN-соединении. Открой системные настройки VPN и проверь подключение NetPause."
+            }
+            warning.addView(makeText(warningBody, 12f, Color.LTGRAY).apply {
+                setPadding(0, dp(6), 0, dp(9))
+            })
             warning.addView(makeButton("ОТКРЫТЬ НАСТРОЙКИ VPN") { openSystemVpnSettings() },
                 LinearLayout.LayoutParams(-1, dp(43)))
             root.addView(warning, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
@@ -348,11 +363,30 @@ class MainActivity : Activity() {
     }
 
     private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33 && !notificationsGranted()) {
-            pendingPermissionStep = "manual_notifications"
+        if (Build.VERSION.SDK_INT < 33 || notificationsGranted()) {
+            Toast.makeText(this, "Уведомления уже разрешены или не требуют отдельного запроса", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        pendingPermissionStep = "manual_notifications"
+        val askedBefore = prefs.getBoolean("notification_permission_asked", false)
+        if (!askedBefore || shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
+            prefs.edit().putBoolean("notification_permission_asked", true).apply()
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), notificationRequestCode)
         } else {
-            Toast.makeText(this, "Уведомления уже разрешены или не требуют отдельного запроса", Toast.LENGTH_SHORT).show()
+            // The system no longer shows the dialog after a permanent denial.
+            // Send the user to the app's notification settings instead of
+            // repeatedly requesting a permission that cannot be granted here.
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                )
+            } catch (_: Exception) {
+                startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+                )
+            }
         }
     }
 
