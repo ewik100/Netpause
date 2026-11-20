@@ -60,16 +60,6 @@ class BlockVpnService : VpnService() {
         stopSelf()
     }
 
-    private val notificationRefresh = object : Runnable {
-        override fun run() {
-            if (prefs.getLong("active_until", 0L) > System.currentTimeMillis()) {
-                getSystemService(NotificationManager::class.java)
-                    .notify(NOTIFICATION_ID, buildNotification())
-                handler.postDelayed(this, 30_000L)
-            }
-        }
-    }
-
     override fun onCreate() {
         super.onCreate()
         saveSystemModeState()
@@ -93,7 +83,6 @@ class BlockVpnService : VpnService() {
 
     private fun clearAndDisconnect() {
         handler.removeCallbacks(stopRunnable)
-        handler.removeCallbacks(notificationRefresh)
         prefs.edit()
             .putLong("active_until", 0L)
             .putLong("active_duration_ms", 0L)
@@ -186,11 +175,8 @@ class BlockVpnService : VpnService() {
             .putLong("active_duration_ms", duration)
             .remove("last_error")
             .apply()
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
         handler.removeCallbacks(stopRunnable)
-        handler.removeCallbacks(notificationRefresh)
         handler.postDelayed(stopRunnable, duration)
-        handler.postDelayed(notificationRefresh, 30_000L)
         return START_NOT_STICKY
     }
 
@@ -289,18 +275,9 @@ class BlockVpnService : VpnService() {
             Notification.Builder(this)
         }
 
-        val remainingMs = (prefs.getLong("active_until", 0L) - System.currentTimeMillis()).coerceAtLeast(0L)
-        val remainingSeconds = remainingMs / 1000L
-        val remainingText = if (remainingMs > 0L) {
-            "Осталось %02d:%02d".format(remainingSeconds / 60L, remainingSeconds % 60L)
-        } else {
-            "Сессия запускается…"
-        }
-
         return builder
             .setContentTitle("NetPause — блокировка активна")
-            .setContentText("$remainingText · Нажми «Остановить», чтобы вернуть интернет.")
-            .setOnlyAlertOnce(true)
+            .setContentText("Выбранные приложения остаются в сети. Нажми «Остановить», чтобы вернуть интернет.")
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(openApp)
             .setOngoing(true)

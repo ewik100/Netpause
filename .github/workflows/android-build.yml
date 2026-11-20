@@ -47,6 +47,20 @@ jobs:
           NETPAUSE_KEY_ALIAS: netpause
         run: gradle --no-daemon assembleDebug
 
+      - name: Archive source project for Claude
+        shell: bash
+        run: |
+          zip -r "$RUNNER_TEMP/NetPause-1.5-source.zip" . \
+            -x ".git/*" ".gradle/*" "*/build/*" "app/build/*" ".idea/*" "*.iml"
+
+      - name: Upload source project
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetPause-1.5-source
+          path: ${{ runner.temp }}/NetPause-1.5-source.zip
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
