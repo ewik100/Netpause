@@ -370,6 +370,50 @@ class MainActivity : Activity() {
         openPocoAppSettings()
     }
 
+    private fun showPocoGuide() {
+        val scroll = ScrollView(this).apply { isFillViewport = true }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(26), dp(20), dp(24))
+            background = pageBackground()
+        }
+        scroll.addView(root)
+        root.addView(makeText("НАСТРОЙКА POCO", 25f, Color.rgb(95, 230, 245), true))
+        root.addView(makeText(
+            "Эти параметры настраиваются один раз. Они не включают VPN и не заменяют основные разрешения Android.",
+            12f, Color.LTGRAY
+        ).apply { setPadding(0, dp(8), 0, dp(15)) })
+
+        val steps = listOf(
+            "1 · Батарея приложения" to "Настройки телефона → Приложения → NetPause → Экономия заряда батареи → «Нет ограничений».",
+            "2 · Фоновый автозапуск" to "Открой приложение «Безопасность» или настройки приложений → Автозапуск. Разреши NetPause, если такой пункт доступен на версии HyperOS.",
+            "3 · Закрепление в фоне" to "После запуска плавающей кнопки открой список недавних приложений. При наличии значка замка закрепи NetPause.",
+            "4 · Проверка" to "Вернись в приложение, запусти плавающую кнопку и проверь, что она остаётся доступной при переключении приложений."
+        )
+        steps.forEach { (heading, body) ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(15), dp(13), dp(15), dp(13))
+                background = panelBackground()
+            }
+            card.addView(makeText(heading, 14f, Color.WHITE, true))
+            card.addView(makeText(body, 12f, Color.LTGRAY).apply {
+                setPadding(0, dp(6), 0, 0)
+            })
+            root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+        }
+        root.addView(makeButton("ОТКРЫТЬ НАСТРОЙКИ NETPAUSE") {
+            openPocoAppSettings()
+        }, LinearLayout.LayoutParams(-1, dp(46)))
+        root.addView(makeButton("НАЗАД К РАЗРЕШЕНИЯМ") {
+            pendingPermissionStep = null
+            showPermissionCenter()
+        }, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(9) })
+        setScreenContent(scroll)
+        root.alpha = 0f
+        root.animate().alpha(1f).setDuration(220L).start()
+    }
+
     private fun openPocoAppSettings() {
         pendingPermissionStep = "manual_poco"
         try {
@@ -387,13 +431,11 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == vpnRequestCode) {
+            pendingPermissionStep = null
             if (resultCode == RESULT_OK) {
-                pendingPermissionStep = null
-                if (permissionFlowRunning) continuePermissionFlow() else showPermissionCenter()
+                showPermissionCenter("Разрешение VPN сохранено. Соединение пока выключено.")
             } else {
-                pendingPermissionStep = null
-                if (permissionFlowRunning) abortPermissionFlow("Разрешение VPN не выдано. Без него блокировка не запустится.")
-                else showPermissionCenter("Разрешение VPN не выдано. Плавающую кнопку можно запускать отдельно.")
+                showPermissionCenter("Разрешение VPN не выдано. Остальные функции NetPause доступны отдельно.")
             }
         }
     }
@@ -407,7 +449,7 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == notificationRequestCode) {
             pendingPermissionStep = null
-            if (permissionFlowRunning) continuePermissionFlow() else showPermissionCenter()
+            showPermissionCenter()
         }
     }
 
@@ -436,7 +478,7 @@ class MainActivity : Activity() {
     private fun stopVpnOnly() {
         // Clear the visible state first, then stop the VPN service itself.
         prefs.edit().putLong("active_until", 0L).apply()
-        stopService(Intent(this, BlockVpnService::class.java))
+        BlockVpnService.requestStop(this)
     }
 
     private fun shutdownNetPause() {
@@ -476,13 +518,6 @@ class MainActivity : Activity() {
             }
             view.requestApplyInsets()
         }
-    }
-
-    private fun usedTodayCount(): Int {
-        val today = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
-        return if (prefs.getString("usage_day", "") == today) {
-            prefs.getInt("usage_count", 0).coerceIn(0, 3)
-        } else 0
     }
 
     private fun showDashboard() {
@@ -542,7 +577,7 @@ class MainActivity : Activity() {
         brandText.addView(makeText("Цифровой фокус под твоим контролем", 11f, Color.rgb(165, 190, 220)))
         header.addView(brandText, LinearLayout.LayoutParams(0, -2, 1f))
         val version = TextView(this).apply {
-            text = "1.0"
+            text = "1.1"
             textSize = 11f
             gravity = Gravity.CENTER
             setTextColor(Color.rgb(115, 235, 230))
@@ -632,9 +667,9 @@ class MainActivity : Activity() {
             })
             return card
         }
-        metrics.addView(metric("${(3 - usedTodayCount()).coerceAtLeast(0)}/3", "запуска осталось"),
+        metrics.addView(metric("∞", "без лимита запусков"),
             LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
-        metrics.addView(metric("120 мин", "макс. таймер"),
+        metrics.addView(metric("120 мин", "макс. таймер сессии"),
             LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
         metrics.addView(metric(allowedCount.toString(), "исключений"),
             LinearLayout.LayoutParams(0, -2, 1f))
@@ -696,7 +731,7 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(-1, dp(49)).apply { topMargin = dp(3) })
 
         root.addView(makeText(
-            "NETPAUSE 1.0  •  До 3 запусков в день  •  До 120 минут",
+            "NETPAUSE 1.1  •  Без лимита запусков  •  До 120 минут за сессию",
             10f,
             Color.rgb(145, 170, 200)
         ).apply {
@@ -725,7 +760,7 @@ class MainActivity : Activity() {
             background = pageBackground()
         }
         scroll.addView(root)
-        root.addView(makeText("NETPAUSE 1.0", 26f, Color.rgb(100, 230, 240), true))
+        root.addView(makeText("NETPAUSE 1.1", 26f, Color.rgb(100, 230, 240), true))
         root.addView(makeText("Локальный инструмент цифрового фокуса", 14f, Color.WHITE, true)
             .apply { setPadding(0, dp(7), 0, dp(15)) })
 
@@ -734,7 +769,7 @@ class MainActivity : Activity() {
             "ИСКЛЮЧЕНИЯ" to "Приложения из списка исключений обходят локальный VPN и сохраняют доступ к интернету. Список хранится на устройстве и может быть изменён в любое время.",
             "ПРИВАТНОСТЬ" to "В этой версии нет аккаунта и собственного сервера. NetPause не отправляет историю использования на сервер. Само приложение не анализирует содержимое трафика.",
             "ВАЖНО" to "Пока блокировка включена, интернет у остальных приложений недоступен. При проблемах останови VPN кнопкой в NetPause или системным переключателем VPN. Поведение нужно проверить на конкретной версии Android и оболочке POCO.",
-            "СТАТУС ВЕРСИИ" to "Версия 1.0 предназначена для тестирования. Перед публикацией в Google Play необходимы отдельная проверка совместимости, корректная подпись релизной сборки, политика конфиденциальности и проверка соответствия правилам магазина."
+            "СТАТУС ВЕРСИИ" to "Версия 1.1 предназначена для тестирования. Перед публикацией в Google Play необходимы отдельная проверка совместимости, корректная подпись релизной сборки, политика конфиденциальности и проверка соответствия правилам магазина."
         )
         notes.forEach { (heading, body) ->
             val card = LinearLayout(this).apply {
