@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "ru.netpause.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "ru.netpause.app"
         minSdk = 26
-        targetSdk = 33
-        versionCode = 6
-        versionName = "0.5"
+        targetSdk = 36
+        versionCode = 7
+        versionName = "1.0"
     }
 
     compileOptions {
