@@ -11,8 +11,8 @@ android {
         applicationId = "ru.netpause.app"
         minSdk = 26
         targetSdk = 33
-        versionCode = 4
-        versionName = "0.3.1"
+        versionCode = 5
+        versionName = "0.4"
     }
 
     compileOptions {
