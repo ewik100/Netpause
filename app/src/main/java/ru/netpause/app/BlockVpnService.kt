@@ -101,6 +101,13 @@ class BlockVpnService : VpnService() {
             return START_NOT_STICKY
         }
 
+        // Refresh diagnostics without changing an active tunnel.
+        if (intent.action == ACTION_REFRESH_SYSTEM_MODES) {
+            saveSystemModeState()
+            if (vpnInterface == null) stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
+
         // Only app actions carrying an explicit duration may create a tunnel.
         // This prevents an accidental default-length block on unexpected starts.
         if (intent.action != ACTION_STOP &&
@@ -109,12 +116,6 @@ class BlockVpnService : VpnService() {
         ) {
             clearAndDisconnect()
             stopSelfResult(startId)
-            return START_NOT_STICKY
-        }
-
-        if (intent.action == ACTION_REFRESH_SYSTEM_MODES) {
-            saveSystemModeState()
-            if (vpnInterface == null) stopSelfResult(startId)
             return START_NOT_STICKY
         }
 
