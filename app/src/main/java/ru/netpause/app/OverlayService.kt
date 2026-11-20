@@ -32,7 +32,6 @@ class OverlayService : Service() {
     private var bubble: View? = null
     private var panel: View? = null
     private lateinit var bubbleParams: WindowManager.LayoutParams
-    private lateinit var panelParams: WindowManager.LayoutParams
     private val handler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("netpause_state", MODE_PRIVATE) }
 
@@ -60,10 +59,12 @@ class OverlayService : Service() {
     private fun notification(): Notification {
         if (Build.VERSION.SDK_INT >= 26) {
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(NotificationChannel(
-                "netpause_overlay", "Плавающая кнопка NetPause",
-                NotificationManager.IMPORTANCE_LOW
-            ))
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    "netpause_overlay", "Плавающая кнопка NetPause",
+                    NotificationManager.IMPORTANCE_LOW
+                )
+            )
         }
         val open = PendingIntent.getActivity(
             this, 72, Intent(this, MainActivity::class.java),
@@ -76,7 +77,8 @@ class OverlayService : Service() {
                 .setContentTitle("NetPause работает")
                 .setContentText("Плавающая кнопка доступна поверх приложений")
                 .setContentIntent(open)
-                .setOngoing(true).build()
+                .setOngoing(true)
+                .build()
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
@@ -84,7 +86,8 @@ class OverlayService : Service() {
                 .setContentTitle("NetPause работает")
                 .setContentText("Плавающая кнопка доступна поверх приложений")
                 .setContentIntent(open)
-                .setOngoing(true).build()
+                .setOngoing(true)
+                .build()
         }
     }
 
@@ -134,7 +137,11 @@ class OverlayService : Service() {
             x = dp(14)
             y = dp(180)
         }
-        try { wm.addView(b, bubbleParams) } catch (_: Exception) { stopSelf() }
+        try {
+            wm.addView(b, bubbleParams)
+        } catch (_: Exception) {
+            stopSelf()
+        }
     }
 
     private inner class BubbleTouch : View.OnTouchListener {
@@ -143,11 +150,14 @@ class OverlayService : Service() {
         private var startX = 0
         private var startY = 0
         private var moved = false
+
         override fun onTouch(v: View, e: MotionEvent): Boolean {
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    downX = e.rawX; downY = e.rawY
-                    startX = bubbleParams.x; startY = bubbleParams.y
+                    downX = e.rawX
+                    downY = e.rawY
+                    startX = bubbleParams.x
+                    startY = bubbleParams.y
                     moved = false
                     return true
                 }
@@ -177,13 +187,13 @@ class OverlayService : Service() {
         if (panel != null) return
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(18))
+            setPadding(dp(19), dp(17), dp(19), dp(17))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(Color.rgb(17, 25, 48), Color.rgb(29, 43, 78))
+                intArrayOf(Color.rgb(14, 22, 45), Color.rgb(29, 44, 80))
             ).apply {
                 cornerRadius = dp(24).toFloat()
-                setStroke(dp(1), Color.rgb(65, 100, 160))
+                setStroke(dp(1), Color.rgb(65, 105, 165))
             }
             elevation = dp(18).toFloat()
         }
@@ -192,7 +202,7 @@ class OverlayService : Service() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val brand = text("NETPAUSE", 17f, Color.rgb(100, 230, 240), true)
+        val brand = text("NETPAUSE", 18f, Color.rgb(100, 230, 240), true)
         val close = text("×", 28f, Color.LTGRAY, true).apply {
             gravity = Gravity.CENTER
             setPadding(dp(12), 0, 0, 0)
@@ -201,49 +211,73 @@ class OverlayService : Service() {
         top.addView(brand, LinearLayout.LayoutParams(0, dp(38), 1f))
         top.addView(close)
         root.addView(top)
-        root.addView(text("ТВОЁ ВРЕМЯ — ПОД КОНТРОЛЕМ", 10f, Color.LTGRAY, true).apply {
-            setPadding(0, dp(5), 0, dp(12))
+
+        root.addView(text("БЫСТРОЕ УПРАВЛЕНИЕ ИНТЕРНЕТОМ", 10f, Color.LTGRAY, true).apply {
+            setPadding(0, dp(4), 0, dp(12))
         })
 
-        val quota = text("АКТИВАЦИИ СЕГОДНЯ: ${3 - usedToday()} / 3", 12f, Color.rgb(180, 205, 230), true)
-        root.addView(quota)
+        root.addView(text("Сегодня осталось: " + (3 - usedToday()).coerceAtLeast(0) + " из 3 запусков", 12f, Color.rgb(180, 205, 230), true))
         root.addView(text(statusText(), 13f, Color.WHITE, true).apply {
-            setPadding(0, dp(14), 0, dp(10))
+            setPadding(0, dp(12), 0, dp(10))
         })
-        root.addView(text("На сколько отключить интернет?", 13f, Color.LTGRAY))
 
+        val allowedCount = prefs.getStringSet("allowed_apps", emptySet())?.size ?: 0
+        root.addView(text(
+            "Интернет останется у $allowedCount выбранных приложений. Остальные будут заблокированы.",
+            12f, Color.LTGRAY
+        ).apply { setPadding(0, 0, 0, dp(10)) })
+
+        val settings = Button(this).apply {
+            text = "НАСТРОИТЬ ПРИЛОЖЕНИЯ"
+            isAllCaps = false
+            textSize = 12f
+            setTextColor(Color.rgb(175, 230, 245))
+            background = rounded(Color.rgb(36, 57, 91), 12, Color.rgb(70, 110, 165))
+            setOnClickListener {
+                closePanel()
+                try {
+                    startActivity(
+                        Intent(this@OverlayService, MainActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    )
+                } catch (_: Exception) {
+                    Toast.makeText(this@OverlayService, "Открой NetPause для выбора приложений", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        root.addView(settings, LinearLayout.LayoutParams(-1, dp(42)).apply { bottomMargin = dp(12) })
+
+        root.addView(text("На сколько минут включить блокировку?", 13f, Color.LTGRAY))
         val input = EditText(this).apply {
             setSingleLine(true)
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            setText(prefs.getInt("last_minutes", 30).toString())
-            hint = "Минуты"
+            setText(prefs.getInt("last_minutes", 30).coerceIn(1, 120).toString())
+            hint = "1–120 минут"
             textSize = 18f
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
             background = rounded(Color.rgb(35, 49, 78), 13, Color.rgb(70, 105, 155))
-            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setPadding(dp(14), dp(9), dp(14), dp(9))
         }
-        val inputLp = LinearLayout.LayoutParams(-1, dp(52))
-        inputLp.topMargin = dp(8)
-        root.addView(input, inputLp)
+        root.addView(input, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(7) })
 
         val presets = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        listOf(15, 30, 45, 60).forEach { value ->
+        listOf(15, 30, 60, 90, 120).forEach { value ->
             val chip = TextView(this).apply {
-                text = "$value"
-                textSize = 13f
+                text = value.toString()
+                textSize = 12f
                 gravity = Gravity.CENTER
                 setTextColor(Color.WHITE)
-                background = rounded(Color.rgb(43, 62, 100), 10)
-                setPadding(dp(12), dp(9), dp(12), dp(9))
+                background = rounded(Color.rgb(43, 62, 100), 9)
+                setPadding(dp(6), dp(8), dp(6), dp(8))
                 setOnClickListener { input.setText(value.toString()) }
             }
-            val lp = LinearLayout.LayoutParams(0, dp(38), 1f)
-            lp.setMargins(dp(3), dp(10), dp(3), 0)
-            presets.addView(chip, lp)
+            presets.addView(chip, LinearLayout.LayoutParams(0, dp(36), 1f).apply {
+                setMargins(dp(2), dp(9), dp(2), 0)
+            })
         }
         root.addView(presets)
 
@@ -258,25 +292,31 @@ class OverlayService : Service() {
             ).apply { cornerRadius = dp(14).toFloat() }
             setOnClickListener {
                 val mins = input.text.toString().toIntOrNull()
-                if (mins == null || mins !in 1..1440) {
-                    Toast.makeText(this@OverlayService, "Укажи от 1 до 1440 минут", Toast.LENGTH_SHORT).show()
+                if (mins == null || mins !in 1..120) {
+                    Toast.makeText(this@OverlayService, "Укажи от 1 до 120 минут", Toast.LENGTH_SHORT).show()
                 } else if (usedToday() >= 3) {
-                    Toast.makeText(this@OverlayService, "На сегодня все 3 активации использованы", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@OverlayService, "На сегодня все 3 запуска использованы", Toast.LENGTH_LONG).show()
                 } else {
                     prefs.edit().putInt("last_minutes", mins).apply()
                     incrementUsage()
-                    val i = Intent(this@OverlayService, BlockVpnService::class.java)
+                    val until = System.currentTimeMillis() + mins * 60_000L
+                    prefs.edit().putLong("active_until", until).apply()
+                    val service = Intent(this@OverlayService, BlockVpnService::class.java)
                         .putExtra(BlockVpnService.EXTRA_DURATION_MS, mins * 60_000L)
-                    if (Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i)
-                    prefs.edit().putLong("active_until", System.currentTimeMillis() + mins * 60_000L).apply()
-                    closePanel()
-                    Toast.makeText(this@OverlayService, "Блокировка включена на $mins мин.", Toast.LENGTH_SHORT).show()
+                    try {
+                        if (Build.VERSION.SDK_INT >= 26) startForegroundService(service)
+                        else startService(service)
+                        closePanel()
+                        Toast.makeText(this@OverlayService, "Блокировка включена на $mins мин.", Toast.LENGTH_SHORT).show()
+                    } catch (_: Exception) {
+                        incrementUsageBack()
+                        prefs.edit().putLong("active_until", 0L).apply()
+                        Toast.makeText(this@OverlayService, "Не удалось включить VPN-блокировку", Toast.LENGTH_LONG).show()
+                    }
                 }
             }
         }
-        val actLp = LinearLayout.LayoutParams(-1, dp(50))
-        actLp.topMargin = dp(14)
-        root.addView(activate, actLp)
+        root.addView(activate, LinearLayout.LayoutParams(-1, dp(51)).apply { topMargin = dp(13) })
 
         val stop = Button(this).apply {
             text = "СНЯТЬ БЛОКИРОВКУ"
@@ -290,23 +330,23 @@ class OverlayService : Service() {
                 Toast.makeText(this@OverlayService, "Блокировка остановлена", Toast.LENGTH_SHORT).show()
             }
         }
-        val stopLp = LinearLayout.LayoutParams(-1, dp(44))
-        stopLp.topMargin = dp(8)
-        root.addView(stop, stopLp)
-        root.addView(text("Окно можно закрыть — круглая кнопка останется поверх приложений.", 10f, Color.LTGRAY).apply {
-            setPadding(0, dp(12), 0, 0)
-        })
+        root.addView(stop, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(8) })
+
+        root.addView(text(
+            "Выбранные приложения остаются онлайн. Остальные — без доступа к сети. Максимум 2 часа.",
+            10f, Color.LTGRAY
+        ).apply { setPadding(0, dp(10), 0, 0) })
 
         panel = root
-        panelParams = WindowManager.LayoutParams(
-            dp(320), WindowManager.LayoutParams.WRAP_CONTENT,
+        val panelParams = WindowManager.LayoutParams(
+            dp(326), WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            y = dp(90)
+            y = dp(64)
         }
         try {
             wm.addView(root, panelParams)
@@ -328,8 +368,8 @@ class OverlayService : Service() {
         val left = prefs.getLong("active_until", 0L) - System.currentTimeMillis()
         return if (left > 0) {
             val total = left / 1000
-            "● БЛОКИРОВКА АКТИВНА  ${total / 60}:${(total % 60).toString().padStart(2, '0')}"
-        } else "○ ИНТЕРНЕТ ДОСТУПЕН"
+            "● БЛОКИРОВКА АКТИВНА  " + (total / 60) + ":" + (total % 60).toString().padStart(2, '0')
+        } else "○ БЛОКИРОВКА ВЫКЛЮЧЕНА"
     }
 
     private fun updateBubble() {
@@ -360,6 +400,11 @@ class OverlayService : Service() {
     private fun incrementUsage() {
         prefs.edit().putString("usage_day", todayKey())
             .putInt("usage_count", usedToday() + 1).apply()
+    }
+
+    private fun incrementUsageBack() {
+        val count = usedToday()
+        prefs.edit().putInt("usage_count", (count - 1).coerceAtLeast(0)).apply()
     }
 
     override fun onDestroy() {
