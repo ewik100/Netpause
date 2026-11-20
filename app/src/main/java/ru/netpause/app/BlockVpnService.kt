@@ -27,8 +27,8 @@ class BlockVpnService : VpnService() {
     private val stopRunnable = Runnable { stopSelf() }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val duration = intent?.getLongExtra(EXTRA_DURATION_MS, 30 * 60_000L)
-            ?: 30 * 60_000L
+        val duration = (intent?.getLongExtra(EXTRA_DURATION_MS, 30 * 60_000L)
+            ?: 30 * 60_000L).coerceIn(60_000L, 120L * 60_000L)
 
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
@@ -42,6 +42,18 @@ class BlockVpnService : VpnService() {
                 .addRoute("::", 0)
                 .setMtu(1500)
 
+            // Эти приложения исключаются из VPN и сохраняют обычный доступ к интернету.
+            // Остальной трафик попадает в VPN и намеренно не пересылается дальше.
+            val allowedApps = getSharedPreferences("netpause_state", MODE_PRIVATE)
+                .getStringSet("allowed_apps", emptySet()) ?: emptySet()
+            for (packageName in allowedApps) {
+                try {
+                    builder.addDisallowedApplication(packageName)
+                } catch (_: Exception) {
+                    // Приложение могло быть удалено после сохранения списка.
+                }
+            }
+
             vpnInterface = builder.establish()
             if (vpnInterface == null) {
                 stopSelf()
@@ -51,7 +63,7 @@ class BlockVpnService : VpnService() {
         }
 
         handler.removeCallbacks(stopRunnable)
-        handler.postDelayed(stopRunnable, duration.coerceIn(60_000L, 24 * 60 * 60_000L))
+        handler.postDelayed(stopRunnable, duration)
         return START_NOT_STICKY
     }
 
@@ -65,7 +77,7 @@ class BlockVpnService : VpnService() {
                     while (running.get()) {
                         val count = input.read(buffer)
                         if (count < 0) break
-                        // Намеренно не пересылаем пакеты: весь IP-трафик блокируется.
+                        // Пакеты не пересылаются: трафик приложений внутри VPN блокируется.
                     }
                 }
             } catch (_: Exception) {
