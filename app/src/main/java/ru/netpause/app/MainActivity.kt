@@ -3,7 +3,6 @@ package ru.netpause.app
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -97,7 +96,7 @@ class MainActivity : Activity() {
         }
 
     private fun showDashboard() {
-        val scroll = ScrollView(this).apply { fillViewport = true }
+        val scroll = ScrollView(this).apply { isFillViewport = true }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(30), dp(22), dp(26))
@@ -126,6 +125,10 @@ class MainActivity : Activity() {
             "Блокировка активна · осталось примерно $remaining мин."
         } else "Блокировка сейчас выключена"
 
+        val overlayState = if (overlayReady && prefs.getBoolean("overlay_enabled", false)) "разрешено" else "не включено"
+        val vpnState = if (vpnReady) "разрешён" else "нужно разрешение"
+        val batteryState = if (batteryFree) "без оптимизации батареи" else "ограничивается батареей"
+
         val statusCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(17), dp(18), dp(17))
@@ -137,9 +140,7 @@ class MainActivity : Activity() {
         })
         statusCard.addView(makeText(
             "Интернет сохраняют: $allowedCount приложений\n" +
-                "Плавающее окно: " + if (overlayReady && prefs.getBoolean("overlay_enabled", false)) "разрешено" else "не включено" +
-                "\nVPN: " + if (vpnReady) "разрешён" else "нужно разрешение" +
-                "\nРабота в фоне: " + if (batteryFree) "без оптимизации батареи" else "ограничивается батареей",
+                "Плавающее окно: $overlayState\nVPN: $vpnState\nРабота в фоне: $batteryState",
             13f, Color.LTGRAY
         ))
         root.addView(statusCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
