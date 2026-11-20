@@ -27,6 +27,10 @@ import java.util.Date
 import java.util.Locale
 
 class MainActivity : Activity() {
+    companion object {
+        const val EXTRA_OPEN_PERMISSIONS = "open_permissions"
+    }
+
     private val vpnRequestCode = 4102
     private val notificationRequestCode = 4103
     private val prefs by lazy { getSharedPreferences("netpause_state", MODE_PRIVATE) }
@@ -46,7 +50,9 @@ class MainActivity : Activity() {
         window.navigationBarColor = Color.rgb(10, 17, 35)
 
         val alreadyOpenedSetup = prefs.getBoolean("permission_center_intro_seen", false)
-        if (!alreadyOpenedSetup) {
+        if (intent.getBooleanExtra(EXTRA_OPEN_PERMISSIONS, false)) {
+            showPermissionCenter()
+        } else if (!alreadyOpenedSetup) {
             prefs.edit().putBoolean("permission_center_intro_seen", true).apply()
             showPermissionCenter()
         } else {
@@ -59,22 +65,21 @@ class MainActivity : Activity() {
         when (pendingPermissionStep) {
             "overlay" -> {
                 pendingPermissionStep = null
-                if (Settings.canDrawOverlays(this)) continuePermissionFlow()
-                else abortPermissionFlow("Разрешение отображения поверх окон пока не выдано.")
-                return
+                if (Settings.canDrawOverlays(this)) {
+                    if (permissionFlowRunning) continuePermissionFlow() else showPermissionCenter()
+                } else {
+                    abortPermissionFlow("Разрешение отображения поверх окон пока не выдано.")
+                }
             }
             "battery" -> {
                 pendingPermissionStep = null
-                completePermissionFlow()
-                return
+                if (permissionFlowRunning) completePermissionFlow() else showPermissionCenter()
             }
-            "vpn", "notifications" -> return
-        }
-
-        if (permissionFlowRunning && pendingPermissionStep == null) {
-            continuePermissionFlow()
-        } else if (!permissionFlowRunning) {
-            showDashboard()
+            "manual_overlay", "manual_battery", "manual_poco" -> {
+                pendingPermissionStep = null
+                showPermissionCenter()
+            }
+            "vpn", "notifications", "manual_notifications" -> Unit
         }
     }
 
@@ -297,12 +302,16 @@ class MainActivity : Activity() {
     private fun completePermissionFlow() {
         permissionFlowRunning = false
         pendingPermissionStep = null
-        prefs.edit().putBoolean("permission_flow_completed", true).apply()
+        prefs.edit()
+            .putBoolean("permission_flow_completed", true)
+            .putBoolean("permission_center_intro_seen", true)
+            .apply()
         showDashboard()
         Toast.makeText(this, "Проверка разрешений завершена. Плавающее окно запускается отдельно.", Toast.LENGTH_LONG).show()
     }
 
     private fun openOverlayPermission() {
+        pendingPermissionStep = "manual_overlay"
         try {
             startActivity(
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
@@ -314,12 +323,16 @@ class MainActivity : Activity() {
 
     private fun requestVpnPermission() {
         val intent = VpnService.prepare(this)
-        if (intent != null) startActivityForResult(intent, vpnRequestCode)
+        if (intent != null) {
+            pendingPermissionStep = "vpn"
+            startActivityForResult(intent, vpnRequestCode)
+        }
         else Toast.makeText(this, "VPN уже разрешён. Сам VPN сейчас не включён.", Toast.LENGTH_SHORT).show()
     }
 
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 && !notificationsGranted()) {
+            pendingPermissionStep = "manual_notifications"
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), notificationRequestCode)
         } else {
             Toast.makeText(this, "Уведомления уже разрешены или не требуют отдельного запроса", Toast.LENGTH_SHORT).show()
@@ -327,6 +340,7 @@ class MainActivity : Activity() {
     }
 
     private fun requestBackgroundFreedom() {
+        pendingPermissionStep = "manual_battery"
         if (Build.VERSION.SDK_INT >= 23 && !batteryUnrestricted()) {
             try {
                 startActivity(
@@ -344,6 +358,7 @@ class MainActivity : Activity() {
     }
 
     private fun openPocoAppSettings() {
+        pendingPermissionStep = "manual_poco"
         try {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
         } catch (_: Exception) {
@@ -363,7 +378,9 @@ class MainActivity : Activity() {
                 pendingPermissionStep = null
                 if (permissionFlowRunning) continuePermissionFlow() else showPermissionCenter()
             } else {
-                abortPermissionFlow("Разрешение VPN не выдано. Без него блокировка не запустится.")
+                pendingPermissionStep = null
+                if (permissionFlowRunning) abortPermissionFlow("Разрешение VPN не выдано. Без него блокировка не запустится.")
+                else showPermissionCenter("Разрешение VPN не выдано. Плавающую кнопку можно запускать отдельно.")
             }
         }
     }
@@ -524,6 +541,7 @@ class MainActivity : Activity() {
 
     private fun showAppPicker() {
         val selected = (prefs.getStringSet("allowed_apps", emptySet()) ?: emptySet()).toMutableSet()
+        val selectedCountLabel = makeText("Выбрано: ${selected.size}", 12f, Color.rgb(170, 210, 235), true)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(24), dp(18), dp(14))
@@ -578,6 +596,7 @@ class MainActivity : Activity() {
                 buttonTintList = android.content.res.ColorStateList.valueOf(Color.rgb(70, 215, 230))
                 setOnCheckedChangeListener { _, checked ->
                     if (checked) selected.add(app.packageName) else selected.remove(app.packageName)
+                    selectedCountLabel.text = "Выбрано: ${selected.size}"
                 }
             }
             row.addView(check, LinearLayout.LayoutParams(0, dp(48), 1f))
@@ -603,9 +622,8 @@ class MainActivity : Activity() {
         appScroll.addView(rows)
         root.addView(appScroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        root.addView(makeText("Выбрано: ${selected.size}", 12f, Color.rgb(170, 210, 235), true).apply {
+        root.addView(selectedCountLabel.apply {
             setPadding(0, dp(8), 0, dp(4))
-            tag = "selected_count"
         })
 
         val save = makeButton("СОХРАНИТЬ СПИСОК") {
