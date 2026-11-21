@@ -22,14 +22,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore NetPause 1.7 project sources
+      - name: Restore NetPause 1.8 project sources
         shell: bash
         run: |
           set -euo pipefail
           test -s .ci/part-01.b64
           cat .ci/part-*.b64 > "$RUNNER_TEMP/netpause-source.tar.xz.b64"
           base64 --decode "$RUNNER_TEMP/netpause-source.tar.xz.b64" > "$RUNNER_TEMP/netpause-source.tar.xz"
-          printf '%s  %s\n' '9b7b1aae935e2edc6d3cedaf047a2a12278862f0828a9c3716c4be8eec45238d' "$RUNNER_TEMP/netpause-source.tar.xz" | sha256sum -c -
+          printf '%s  %s\n' '90bc4c59ff5b8970a48ed845d1633587c2df2db6d7e81cfdb44dd9e8ecb7a153' "$RUNNER_TEMP/netpause-source.tar.xz" | sha256sum -c -
           tar -xJf "$RUNNER_TEMP/netpause-source.tar.xz" -C "$GITHUB_WORKSPACE"
           test -f app/build.gradle.kts
           test -f app/src/main/AndroidManifest.xml
