@@ -1,70 +1,150 @@
-name: Build Android APK
+name: NetPause Android CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: netpause-android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: Test, lint and build APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Restore NetPause 1.7 project sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .ci/part-01.b64
+          cat .ci/part-*.b64 > "$RUNNER_TEMP/netpause-source.tar.xz.b64"
+          base64 --decode "$RUNNER_TEMP/netpause-source.tar.xz.b64" > "$RUNNER_TEMP/netpause-source.tar.xz"
+          printf '%s  %s\n' '9b7b1aae935e2edc6d3cedaf047a2a12278862f0828a9c3716c4be8eec45238d' "$RUNNER_TEMP/netpause-source.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/netpause-source.tar.xz" -C "$GITHUB_WORKSPACE"
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+          rm -rf .ci
+          echo "NetPause 1.7 sources restored."
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
+          cache: gradle
 
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.11.1"
+          gradle-version: '8.11.1'
 
-      - name: Prepare optional persistent signing key
+      - name: Read app version
+        id: version
         shell: bash
         run: |
-          if [ -n "$NETPAUSE_KEYSTORE_BASE64" ]; then
+          set -euo pipefail
+          NAME=$(grep -oP 'versionName\\s*=\\s*"\\K[^" ]+' app/build.gradle.kts)
+          CODE=$(grep -oP 'versionCode\\s*=\\s*\\K[0-9]+' app/build.gradle.kts)
+          test -n "$NAME" && test -n "$CODE"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "Building NetPause $NAME (versionCode $CODE)"
+
+      - name: Prepare optional persistent signing key
+        id: signing
+        shell: bash
+        env:
+          NETPAUSE_KEYSTORE_BASE64: ${{ secrets.NETPAUSE_KEYSTORE_BASE64 }}
+          NETPAUSE_KEYSTORE_PASSWORD: ${{ secrets.NETPAUSE_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$NETPAUSE_KEYSTORE_BASE64" && -n "$NETPAUSE_KEYSTORE_PASSWORD" ]]; then
             printf '%s' "$NETPAUSE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/netpause-signing.p12"
             test -s "$RUNNER_TEMP/netpause-signing.p12"
             chmod 600 "$RUNNER_TEMP/netpause-signing.p12"
-            echo "Persistent signing key detected."
+            echo 'persistent=true' >> "$GITHUB_OUTPUT"
+            echo 'Persistent signing key configured.'
           else
-            echo "::warning::No persistent signing key configured. This APK will use a temporary debug key and cannot be installed as an in-place update to a differently signed build."
+            echo 'persistent=false' >> "$GITHUB_OUTPUT"
+            echo '::warning::Persistent signing key is not configured; APK will use the CI debug key and may not update an existing installation.'
           fi
-        env:
-          NETPAUSE_KEYSTORE_BASE64: ${{ secrets.NETPAUSE_KEYSTORE_BASE64 }}
 
-      - name: Build NetPause 1.5 APK
+      - name: Run unit tests
+        run: gradle --no-daemon testDebugUnitTest
+
+      - name: Run Android lint
+        run: gradle --no-daemon lintDebug
+
+      - name: Build debug APK
         env:
           NETPAUSE_KEYSTORE_FILE: ${{ runner.temp }}/netpause-signing.p12
           NETPAUSE_KEYSTORE_PASSWORD: ${{ secrets.NETPAUSE_KEYSTORE_PASSWORD }}
           NETPAUSE_KEY_ALIAS: netpause
         run: gradle --no-daemon assembleDebug
 
-      - name: Archive source project for Claude
+      - name: Verify and package APK
         shell: bash
         run: |
-          zip -r "$RUNNER_TEMP/NetPause-1.5-source.zip" . \
-            -x ".git/*" ".gradle/*" "*/build/*" "app/build/*" ".idea/*" "*.iml"
+          set -euo pipefail
+          APK_SRC=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
+          test -n "$APK_SRC"
+          mkdir -p dist
+          APK="dist/NetPause-${{ steps.version.outputs.name }}-debug.apk"
+          cp "$APK_SRC" "$APK"
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          test -x "$BT/aapt2"
+          test -x "$BT/apksigner"
+          "$BT/aapt2" dump badging "$APK" > dist/badging.txt
+          grep -q "name='ru.netpause.app'" dist/badging.txt
+          grep -q "versionCode='${{ steps.version.outputs.code }}'" dist/badging.txt
+          grep -q "versionName='${{ steps.version.outputs.name }}'" dist/badging.txt
+          "$BT/apksigner" verify --verbose --print-certs "$APK" > dist/signing.txt
+          sha256sum "$APK" | tee dist/sha256.txt
+          cat dist/signing.txt
 
-      - name: Upload source project
+      - name: Archive complete source project
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -r "dist/NetPause-${{ steps.version.outputs.name }}-source.zip" . \\
+            -x '.git/*' '.gradle/*' '*/build/*' 'app/build/*' 'dist/*' '.idea/*' '*.iml' 'local.properties'
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NetPause-1.5-source
-          path: ${{ runner.temp }}/NetPause-1.5-source.zip
+          name: NetPause-${{ steps.version.outputs.name }}-debug-apk
+          path: |
+            dist/NetPause-${{ steps.version.outputs.name }}-debug.apk
+            dist/signing.txt
+            dist/sha256.txt
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
 
-      - name: Upload APK
+      - name: Upload source artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NetPause-1.5-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: NetPause-${{ steps.version.outputs.name }}-source
+          path: dist/NetPause-${{ steps.version.outputs.name }}-source.zip
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetPause-${{ steps.version.outputs.name }}-reports
+          path: |
+            app/build/reports/tests/
+            app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+          retention-days: 30
