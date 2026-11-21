@@ -121,8 +121,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          zip -r "dist/NetPause-${{ steps.version.outputs.name }}-source.zip" . \\
-            -x '.git/*' '.gradle/*' '*/build/*' 'app/build/*' 'dist/*' '.idea/*' '*.iml' 'local.properties'
+          zip -qr "dist/NetPause-${{ steps.version.outputs.name }}-source.zip" . -x '.git/*' '.gradle/*' '*/build/*' 'app/build/*' 'dist/*' '.idea/*' '*.iml' 'local.properties'
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
