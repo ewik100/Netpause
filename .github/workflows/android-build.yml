@@ -53,8 +53,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          NAME=$(grep -oP 'versionName\\s*=\\s*"\\K[^" ]+' app/build.gradle.kts)
-          CODE=$(grep -oP 'versionCode\\s*=\\s*\\K[0-9]+' app/build.gradle.kts)
+          NAME=$(awk -F '"' '/versionName[[:space:]]*=/{print $2; exit}' app/build.gradle.kts)
+          CODE=$(awk '/versionCode[[:space:]]*=/{gsub(/[^0-9]/,""); print; exit}' app/build.gradle.kts)
           test -n "$NAME" && test -n "$CODE"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
