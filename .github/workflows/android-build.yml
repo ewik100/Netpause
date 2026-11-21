@@ -33,6 +33,9 @@ jobs:
           tar -xJf "$RUNNER_TEMP/netpause-source.tar.xz" -C "$GITHUB_WORKSPACE"
           test -f app/build.gradle.kts
           test -f app/src/main/AndroidManifest.xml
+          if ! grep -q 'android.permission.ACCESS_NETWORK_STATE' app/src/main/AndroidManifest.xml; then
+            sed -i '/android.permission.INTERNET/a\    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />' app/src/main/AndroidManifest.xml
+          fi
           rm -rf .ci
           echo "NetPause 1.7 sources restored."
 
