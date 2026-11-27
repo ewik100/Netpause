@@ -1,0 +1,134 @@
+--- a/app/src/main/java/ru/netpause/app/TaskPlanner.kt
++++ b/app/src/main/java/ru/netpause/app/TaskPlanner.kt
+@@ -107,8 +107,12 @@
+ 
+     fun activeTickerText(prefs: SharedPreferences): String = activeTickerText(read(prefs))
+ 
++    /**
++     * Строка плана показывает все сохранённые задачи.
++     * Галочка отмечает выполнение, но не удаляет текст из бегущей строки:
++     * пользователь сам решает, когда удалить выполненную задачу из списка.
++     */
+     fun activeTickerText(tasks: List<FocusTaskEntry>): String = tasks
+-        .filterNot { it.completed }
+         .joinToString("     •     ") { it.title }
+         .take(700)
+ 
+--- a/app/src/test/java/ru/netpause/app/TaskPlannerLogicTest.kt
++++ b/app/src/test/java/ru/netpause/app/TaskPlannerLogicTest.kt
+@@ -17,12 +17,15 @@
+     }
+ 
+     @Test
+-    fun tickerContainsOnlyTasksThatAreNotCompleted() {
++    fun tickerKeepsTaskTextVisibleWhetherCheckboxIsCheckedOrNot() {
+         val tasks = listOf(
+             FocusTaskEntry("task-0001", "Подготовить проект", false),
+             FocusTaskEntry("task-0002", "Убрать комнату", true)
+         )
+-        assertEquals("Подготовить проект", FocusTaskStore.activeTickerText(tasks))
++        assertEquals(
++            "Подготовить проект     •     Убрать комнату",
++            FocusTaskStore.activeTickerText(tasks)
++        )
+     }
+ 
+     @Test
+--- a/app/src/main/java/ru/netpause/app/MainActivity.kt
++++ b/app/src/main/java/ru/netpause/app/MainActivity.kt
+@@ -179,9 +179,9 @@
+                 showDashboard()
+             }
+         }
+-        // A short, skippable brand animation. Permission deep-links bypass it so
+-        // that system settings return paths remain immediate and predictable.
+-        if (savedInstanceState == null && !openPermissions) showIntroSplash(showTargetScreen)
++        // Show the branded intro on every fresh app launch, including permission
++        // entry points. Restored Activity instances continue without replaying it.
++        if (savedInstanceState == null) showIntroSplash(showTargetScreen)
+         else showTargetScreen()
+     }
+ 
+@@ -280,16 +280,21 @@
+             }
+         }
+         splash.setOnClickListener { finish() }
+-        splashAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+-            duration = 2500L
+-            interpolator = AccelerateDecelerateInterpolator()
+-            addUpdateListener { animation ->
+-                splash.progress = animation.animatedValue as Float
++        // Start only after the splash view has been attached and measured. This
++        // prevents the first animation frames being drawn against a zero-sized view.
++        splash.post {
++            if (finished || isFinishing || isDestroyed) return@post
++            splashAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
++                duration = 2600L
++                interpolator = AccelerateDecelerateInterpolator()
++                addUpdateListener { animation ->
++                    splash.progress = animation.animatedValue as Float
++                }
++                addListener(object : android.animation.AnimatorListenerAdapter() {
++                    override fun onAnimationEnd(animation: android.animation.Animator) = finish()
++                })
++                start()
+             }
+-            addListener(object : android.animation.AnimatorListenerAdapter() {
+-                override fun onAnimationEnd(animation: android.animation.Animator) = finish()
+-            })
+-            start()
+         }
+     }
+ 
+@@ -1417,16 +1422,35 @@
+         // between programmatically-built screens when setContentView replaces a root.
+         window.setBackgroundDrawable(ColorDrawable(Color.rgb(8, 15, 29)))
+         currentRootScroll = view as? ScrollView
++        val pageChanged = displayedPage != currentPage
+         displayedPage = currentPage
+-        view.alpha = 0f
++        view.alpha = if (pageChanged) 0f else 1f
+         setContentView(view)
+         currentRootScroll?.let { scroll ->
+             val targetY = pageScrollPositions[currentPage] ?: 0
+             scroll.post { if (!isDestroyed) scroll.scrollTo(0, targetY.coerceAtLeast(0)) }
+         }
+         view.animate().cancel()
+-        view.animate().alpha(1f).setDuration(150L)
+-            .setInterpolator(AccelerateDecelerateInterpolator()).start()
++        if (pageChanged) {
++            view.animate().alpha(1f).setDuration(190L)
++                .setInterpolator(AccelerateDecelerateInterpolator()).start()
++            // Subtle staggered entrance on navigation only. Same-page refreshes
++            // (checkboxes, timer and settings) remain still to avoid visual resets.
++            val content = if (view is ScrollView && view.childCount > 0) view.getChildAt(0) as? LinearLayout else view as? LinearLayout
++            if (content != null) {
++                for (index in 0 until content.childCount) {
++                    val child = content.getChildAt(index)
++                    child.animate().cancel()
++                    child.alpha = 0f
++                    child.translationY = dp(9).toFloat()
++                    child.animate().alpha(1f).translationY(0f)
++                        .setStartDelay((index * 24L).coerceAtMost(144L))
++                        .setDuration(230L)
++                        .setInterpolator(AccelerateDecelerateInterpolator())
++                        .start()
++                }
++            }
++        }
+         if (Build.VERSION.SDK_INT >= 35) {
+             val baseLeft = view.paddingLeft
+             val baseTop = view.paddingTop
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -10,8 +10,8 @@
+         applicationId = "ru.netpause.app"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 27
+-        versionName = "6.0.1"
++        versionCode = 28
++        versionName = "6.0.2"
+     }
+ 
+     buildTypes {
