@@ -202,8 +202,8 @@ jobs:
           grep -q "name='ru.netpause.app'" dist/debug-badging.txt
           grep -q "versionCode='29'" dist/debug-badging.txt
           grep -q "versionName='6.1.0'" dist/debug-badging.txt
-          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-6.0.2-debug.apk > dist/debug-signing.txt
-          sha256sum dist/NetPause-6.0.2-debug.apk > dist/debug-sha256.txt
+          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-6.1.0-debug.apk > dist/debug-signing.txt
+          sha256sum dist/NetPause-6.1.0-debug.apk > dist/debug-sha256.txt
 
       - name: Archive complete NetPause 6.1.0 source
         shell: bash
