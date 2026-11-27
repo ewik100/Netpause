@@ -33,7 +33,7 @@ jobs:
           gh run download 45933298537 --repo "${{ github.repository }}" --name "NetPause-3.1-source" --dir "$RUNNER_TEMP/netpause-source"
           SOURCE_ZIP=$(find "$RUNNER_TEMP/netpause-source" -type f -name 'NetPause-3.1-source.zip' -print -quit)
           test -n "$SOURCE_ZIP"
-          unzip -q "$SOURCE_ZIP" -d "$GITHUB_WORKSPACE"
+          unzip -oq "$SOURCE_ZIP" -d "$GITHUB_WORKSPACE"
           test -f app/build.gradle.kts
           test -f app/src/main/java/ru/netpause/app/MainActivity.kt
 
