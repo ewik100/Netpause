@@ -1,0 +1,111 @@
+name: NetPause 4.1 APK fast build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: netpause-4.1-apk-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore validated NetPause 3.1 source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/netpause-source"
+          gh run download 45933298537 --repo "${{ github.repository }}" --name "NetPause-3.1-source" --dir "$RUNNER_TEMP/netpause-source"
+          SOURCE_ZIP=$(find "$RUNNER_TEMP/netpause-source" -type f -name 'NetPause-3.1-source.zip' -print -quit)
+          test -n "$SOURCE_ZIP"
+          mkdir -p "$RUNNER_TEMP/netpause-workflows"
+          cp .github/workflows/android-build.yml "$RUNNER_TEMP/netpause-workflows/android-build.yml"
+          cp .github/workflows/netpause-4.0-apk.yml "$RUNNER_TEMP/netpause-workflows/netpause-4.0-apk.yml"
+          unzip -oq "$SOURCE_ZIP" -d "$GITHUB_WORKSPACE"
+          cp "$RUNNER_TEMP/netpause-workflows/android-build.yml" .github/workflows/android-build.yml
+          cp "$RUNNER_TEMP/netpause-workflows/netpause-4.0-apk.yml" .github/workflows/netpause-4.0-apk.yml
+          test -f app/build.gradle.kts
+          test -f app/src/main/java/ru/netpause/app/MainActivity.kt
+
+      - name: Apply NetPause 4.1 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .ci/upgrade-4.0-part-*.b64 > "$RUNNER_TEMP/netpause-4.0.patch.xz.b64"
+          base64 --decode "$RUNNER_TEMP/netpause-4.0.patch.xz.b64" > "$RUNNER_TEMP/netpause-4.0.patch.xz"
+          EXPECTED=$(awk '{print $1}' .ci/upgrade-4.0.patch.xz.sha256)
+          printf '%s  %s\n' "$EXPECTED" "$RUNNER_TEMP/netpause-4.0.patch.xz" | sha256sum --check -
+          xz --decompress --stdout "$RUNNER_TEMP/netpause-4.0.patch.xz" > "$RUNNER_TEMP/netpause-4.0.patch"
+          patch --batch --forward -p1 < "$RUNNER_TEMP/netpause-4.0.patch"
+          grep -q 'versionName = "4.0"' app/build.gradle.kts
+          grep -q 'versionCode = 22' app/build.gradle.kts
+          grep -q 'applicationId = "ru.netpause.app"' app/build.gradle.kts
+
+      - name: Apply NetPause 4.1 neon UI patch and logo
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .ci/upgrade-4.1-part-*.b64 > "$RUNNER_TEMP/netpause-4.1.patch.xz.b64"
+          base64 --decode "$RUNNER_TEMP/netpause-4.1.patch.xz.b64" > "$RUNNER_TEMP/netpause-4.1.patch.xz"
+          EXPECTED=$(awk '{print $1}' .ci/upgrade-4.1.patch.xz.sha256)
+          printf '%s  %s\n' "$EXPECTED" "$RUNNER_TEMP/netpause-4.1.patch.xz" | sha256sum --check -
+          xz --decompress --stdout "$RUNNER_TEMP/netpause-4.1.patch.xz" > "$RUNNER_TEMP/netpause-4.1.patch"
+          patch --batch --forward -p1 < "$RUNNER_TEMP/netpause-4.1.patch"
+          mkdir -p app/src/main/res/drawable-nodpi
+          cp .ci/netpause-brand.webp app/src/main/res/drawable-nodpi/netpause_brand.webp
+          grep -q 'versionName = "4.1"' app/build.gradle.kts
+          grep -q 'versionCode = 23' app/build.gradle.kts
+          grep -q 'applicationId = "ru.netpause.app"' app/build.gradle.kts
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Verify APK package and signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APK_SRC=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
+          test -n "$APK_SRC"
+          cp "$APK_SRC" dist/NetPause-4.1-debug.apk
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          "$BT/aapt2" dump badging dist/NetPause-4.1-debug.apk > dist/badging.txt
+          grep -q "name='ru.netpause.app'" dist/badging.txt
+          grep -q "versionCode='23'" dist/badging.txt
+          grep -q "versionName='4.1'" dist/badging.txt
+          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-4.1-debug.apk > dist/signing.txt
+          sha256sum dist/NetPause-4.1-debug.apk > dist/sha256.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetPause-4.1-debug-apk
+          path: |
+            dist/NetPause-4.1-debug.apk
+            dist/badging.txt
+            dist/signing.txt
+            dist/sha256.txt
+          if-no-files-found: error
+          retention-days: 30
