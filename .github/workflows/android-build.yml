@@ -140,7 +140,7 @@ jobs:
         shell: bash
         run: |
           echo 'persistent=false' >> "$GITHUB_OUTPUT"
-          echo 'Private signing stays on the owner's computer. This public workflow does not receive signing keys or passwords.'
+          echo "Private signing stays on the owner computer. This public workflow does not receive signing keys or passwords."
 
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
