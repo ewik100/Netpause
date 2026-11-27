@@ -54,7 +54,7 @@ edit("app/src/main/java/ru/netpause/app/MainActivity.kt",
             includeFontPadding = false
             setLineSpacing(dp(2).toFloat(), 1.0f)
             if (Build.VERSION.SDK_INT >= 23) {
-                breakStrategy = android.text.Layout.BREAK_STRATEGY_HIGH_QUALITY
+                breakStrategy = android.graphics.text.LineBreaker.BREAK_STRATEGY_HIGH_QUALITY
                 hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NORMAL
             }
             if (bold) setTypeface(typeface, Typeface.BOLD)''')
