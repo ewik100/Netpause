@@ -111,6 +111,12 @@ jobs:
           grep -q 'versionCode = 26' app/build.gradle.kts
           grep -q 'applicationId = "ru.netpause.app"' app/build.gradle.kts
 
+      - name: Apply NetPause 6.0 compile fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch --batch --forward -p1 < .ci/upgrade-6.0-fix1.patch
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
