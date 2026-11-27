@@ -216,7 +216,7 @@ jobs:
         with:
           name: NetPause-6.1.0-debug-apk
           path: |
-            dist/NetPause-6.0.2-debug.apk
+            dist/NetPause-6.1.0-debug.apk
             dist/debug-badging.txt
             dist/debug-signing.txt
             dist/debug-sha256.txt
