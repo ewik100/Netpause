@@ -1,4 +1,4 @@
-name: NetPause Android CI
+name: NetPause Android CI # verified APK path
 
 on:
   push:
