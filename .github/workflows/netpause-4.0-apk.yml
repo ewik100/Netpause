@@ -2,7 +2,7 @@ name: NetPause 5.0 APK fast build
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, netpause-4.0-preview]
 
 permissions:
   contents: read
@@ -71,7 +71,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .ci/upgrade-5.0-part-*.b64 > "$RUNNER_TEMP/netpause-5.0.patch.xz.b64"
+          cat .ci/upgrade-5.0-part-00.b64 .ci/upgrade-5.0-segment-*.b64 .ci/upgrade-5.0-part-02.b64 > "$RUNNER_TEMP/netpause-5.0.patch.xz.b64"
           base64 --decode "$RUNNER_TEMP/netpause-5.0.patch.xz.b64" > "$RUNNER_TEMP/netpause-5.0.patch.xz"
           EXPECTED=$(awk '{print $1}' .ci/upgrade-5.0.patch.xz.sha256)
           printf '%s  %s\n' "$EXPECTED" "$RUNNER_TEMP/netpause-5.0.patch.xz" | sha256sum --check -
