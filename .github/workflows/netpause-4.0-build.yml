@@ -1,0 +1,186 @@
+name: NetPause 4.0 build
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_run:
+    workflows: ["NetPause Android CI"]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: netpause-4-build-${{ github.event.pull_request.number || github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: ${{ github.event_name == 'pull_request' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout NetPause 4.0 changes
+        uses: actions/checkout@v4
+
+      - name: Download the validated 3.1 source artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            RUN_ID="45933298537"
+          else
+            RUN_ID="${{ github.event.workflow_run.id }}"
+          fi
+          mkdir -p "$RUNNER_TEMP/netpause-artifact"
+          gh run download "$RUN_ID" --repo "${{ github.repository }}" --name "NetPause-3.1-source" --dir "$RUNNER_TEMP/netpause-artifact"
+          SOURCE_ZIP=$(find "$RUNNER_TEMP/netpause-artifact" -type f -name 'NetPause-3.1-source.zip' -print -quit)
+          test -n "$SOURCE_ZIP"
+          unzip -q "$SOURCE_ZIP" -d "$GITHUB_WORKSPACE"
+          test -f app/build.gradle.kts
+          test -f app/src/main/java/ru/netpause/app/MainActivity.kt
+
+      - name: Apply the reviewed NetPause 4.0 source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .ci/upgrade-4.0-part-*.b64 > "$RUNNER_TEMP/netpause-4.0.patch.xz.b64"
+          base64 --decode "$RUNNER_TEMP/netpause-4.0.patch.xz.b64" > "$RUNNER_TEMP/netpause-4.0.patch.xz"
+          EXPECTED=$(awk '{print $1}' .ci/upgrade-4.0.patch.xz.sha256)
+          printf '%s  %s\n' "$EXPECTED" "$RUNNER_TEMP/netpause-4.0.patch.xz" | sha256sum --check -
+          xz --decompress --stdout "$RUNNER_TEMP/netpause-4.0.patch.xz" > "$RUNNER_TEMP/netpause-4.0.patch"
+          patch --batch --forward -p1 < "$RUNNER_TEMP/netpause-4.0.patch"
+          rm -rf .ci
+          grep -q 'versionName = "4.0"' app/build.gradle.kts
+          grep -q 'applicationId = "ru.netpause.app"' app/build.gradle.kts
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Run unit tests and Android lint
+        run: |
+          gradle --no-daemon testDebugUnitTest
+          gradle --no-daemon lintDebug
+
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Verify and package debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APK_SRC=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
+          test -n "$APK_SRC"
+          cp "$APK_SRC" dist/NetPause-4.0-debug.apk
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          "$BT/aapt2" dump badging dist/NetPause-4.0-debug.apk > dist/debug-badging.txt
+          grep -q "name='ru.netpause.app'" dist/debug-badging.txt
+          grep -q "versionCode='22'" dist/debug-badging.txt
+          grep -q "versionName='4.0'" dist/debug-badging.txt
+          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-4.0-debug.apk > dist/debug-signing.txt
+          sha256sum dist/NetPause-4.0-debug.apk > dist/debug-sha256.txt
+
+      - name: Check whether persistent release signing is configured
+        id: release_signing
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.NETPAUSE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.NETPAUSE_KEYSTORE_PASSWORD }}
+        run: |
+          if [[ -n "$KEYSTORE_B64" && -n "$STORE_PASSWORD" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No persistent upload key configured. Debug APK will be provided; signed Play APK/AAB are skipped."
+          fi
+
+      - name: Build signed release APK and AAB
+        if: steps.release_signing.outputs.configured == 'true'
+        shell: bash
+        env:
+          NETPAUSE_KEYSTORE_BASE64: ${{ secrets.NETPAUSE_KEYSTORE_BASE64 }}
+          NETPAUSE_KEYSTORE_PASSWORD: ${{ secrets.NETPAUSE_KEYSTORE_PASSWORD }}
+          NETPAUSE_KEY_PASSWORD: ${{ secrets.NETPAUSE_KEY_PASSWORD }}
+          NETPAUSE_KEY_ALIAS: ${{ secrets.NETPAUSE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$NETPAUSE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/netpause-signing.p12"
+          chmod 600 "$RUNNER_TEMP/netpause-signing.p12"
+          export NETPAUSE_KEYSTORE_FILE="$RUNNER_TEMP/netpause-signing.p12"
+          export NETPAUSE_KEY_PASSWORD="${NETPAUSE_KEY_PASSWORD:-$NETPAUSE_KEYSTORE_PASSWORD}"
+          export NETPAUSE_KEY_ALIAS="${NETPAUSE_KEY_ALIAS:-netpause}"
+          gradle --no-daemon assembleRelease bundleRelease
+          APK_SRC=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
+          AAB_SRC=$(find app/build/outputs/bundle/release -maxdepth 1 -name '*.aab' -print -quit)
+          test -n "$APK_SRC" && test -n "$AAB_SRC"
+          cp "$APK_SRC" dist/NetPause-4.0-release.apk
+          cp "$AAB_SRC" dist/NetPause-4.0.aab
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-4.0-release.apk > dist/release-signing.txt
+          jarsigner -verify -verbose -certs dist/NetPause-4.0.aab > dist/aab-signing.txt
+          sha256sum dist/NetPause-4.0-release.apk dist/NetPause-4.0.aab > dist/release-sha256.txt
+
+      - name: Archive complete source
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip -qr dist/NetPause-4.0-source.zip . -x '.git/*' '.gradle/*' '*/build/*' 'app/build/*' 'dist/*' '.idea/*' '*.iml' 'local.properties'
+
+      - name: Upload debug APK and source
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetPause-4.0-debug-apk
+          path: |
+            dist/NetPause-4.0-debug.apk
+            dist/debug-badging.txt
+            dist/debug-signing.txt
+            dist/debug-sha256.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload complete source
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetPause-4.0-source
+          path: dist/NetPause-4.0-source.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload signed Play release outputs
+        if: steps.release_signing.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetPause-4.0-play-release
+          path: |
+            dist/NetPause-4.0-release.apk
+            dist/NetPause-4.0.aab
+            dist/release-signing.txt
+            dist/aab-signing.txt
+            dist/release-sha256.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetPause-4.0-reports
+          path: |
+            app/build/reports/tests/
+            app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+          retention-days: 30
