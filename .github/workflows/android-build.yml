@@ -33,7 +33,10 @@ jobs:
           gh run download 45933298537 --repo "${{ github.repository }}" --name "NetPause-3.1-source" --dir "$RUNNER_TEMP/netpause-source"
           SOURCE_ZIP=$(find "$RUNNER_TEMP/netpause-source" -type f -name 'NetPause-3.1-source.zip' -print -quit)
           test -n "$SOURCE_ZIP"
+          mkdir -p "$RUNNER_TEMP/netpause-workflow"
+          cp "$GITHUB_WORKSPACE/.github/workflows/android-build.yml" "$RUNNER_TEMP/netpause-workflow/android-build.yml"
           unzip -oq "$SOURCE_ZIP" -d "$GITHUB_WORKSPACE"
+          cp "$RUNNER_TEMP/netpause-workflow/android-build.yml" "$GITHUB_WORKSPACE/.github/workflows/android-build.yml"
           test -f app/build.gradle.kts
           test -f app/src/main/java/ru/netpause/app/MainActivity.kt
 
@@ -47,7 +50,6 @@ jobs:
           printf '%s  %s\n' "$EXPECTED" "$RUNNER_TEMP/netpause-4.0.patch.xz" | sha256sum --check -
           xz --decompress --stdout "$RUNNER_TEMP/netpause-4.0.patch.xz" > "$RUNNER_TEMP/netpause-4.0.patch"
           patch --batch --forward -p1 < "$RUNNER_TEMP/netpause-4.0.patch"
-          rm -rf .ci
           grep -q 'versionName = "4.0"' app/build.gradle.kts
           grep -q 'versionCode = 22' app/build.gradle.kts
           grep -q 'applicationId = "ru.netpause.app"' app/build.gradle.kts
