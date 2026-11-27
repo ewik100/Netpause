@@ -41,7 +41,7 @@ edit("app/src/main/java/ru/netpause/app/MainActivity.kt",
             checkForAppUpdates()
         }, LinearLayout.LayoutParams(-1, dp(52)).apply { bottomMargin = dp(14) })
 ''',"")
-edit("app/src/main/java/ru/netpause/app/MainActivity.kt","        resumeInterruptedPlayUpdate()\\n","")
+edit("app/src/main/java/ru/netpause/app/MainActivity.kt","        resumeInterruptedPlayUpdate()\n","")
 # More robust line metrics and wrapping for narrow screens.
 edit("app/src/main/java/ru/netpause/app/MainActivity.kt",
 '''            text = value
@@ -98,6 +98,15 @@ edit("app/src/main/java/ru/netpause/app/OverlayService.kt",
 edit("app/src/main/java/ru/netpause/app/OverlayService.kt",
 '''        val iconSize = dp((sizeDp * 0.52f).toInt())''',
 '''        val iconSize = dp(minOf((sizeDp * 0.68f).toInt(), sizeDp - 17))''')
+# Point the Android adaptive launcher icon at the new globe/pause artwork.
+edit("app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
+'''    <foreground android:drawable="@drawable/netpause_brand" />''',
+'''    <foreground android:drawable="@drawable/netpause_brand_v2" />''')
+# Keep the setup guide and release notes aligned with the actual build.
+edit("README_RU.md",'# NetPause 6.0.2','# NetPause 6.1.0')
+edit("README_RU.md",'## Что есть в 6.0.2','## Что изменено в 6.1.0')
+edit("INSTALL_RU.md",'NetPause 6.0.2','NetPause 6.1.0')
+edit("INSTALL_RU.md",'NetPause-6.0.2-debug.apk','NetPause-6.1.0-debug.apk')
 # App version and free mode remain unchanged.
 edit("app/build.gradle.kts",'versionCode = 28','versionCode = 29')
 edit("app/build.gradle.kts",'versionName = "6.0.2"','versionName = "6.1.0"')
