@@ -157,6 +157,7 @@ s = s.replace('    <uses-permission android:name="android.permission.REQUEST_IGN
 manifest.write_text(s, encoding="utf-8")
 
 # Replace the battery-exemption action robustly, preserving the prior negative action.
+s = main.read_text(encoding="utf-8")
 start = s.find('.setNeutralButton("Открыть настройки батареи")')
 if start < 0:
     raise SystemExit("Missing battery settings dialog anchor")
