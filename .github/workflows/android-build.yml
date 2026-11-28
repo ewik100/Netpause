@@ -2,7 +2,7 @@ name: NetPause Android CI # verified APK path
 
 on:
   push:
-    branches: [main]
+    branches: [main, netpause-6.2.0-localization-validation]
   pull_request:
   workflow_dispatch:
 
@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    name: Test, lint and build NetPause 6.1.0
+    name: Test, lint and build NetPause 6.7.0
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -161,6 +161,24 @@ jobs:
       - name: Apply NetPause 6.1.0 responsive UI, icon and permission flow
         run: bash .ci/apply-6.1.0.sh
 
+      - name: Apply NetPause 6.2.0 RU/EN language layer
+        run: bash .ci/apply-6.2.0.sh
+
+      - name: Apply NetPause 6.3.0 expanded translations and version
+        run: bash .ci/apply-6.3.0.sh
+
+      - name: Apply NetPause 6.4.0 overlay and VPN notification localization
+        run: bash .ci/apply-6.4.0.sh
+
+      - name: Apply NetPause 6.5.0 stable signing and release configuration
+        run: bash .ci/apply-6.5.0.sh
+
+      - name: Apply NetPause 6.6.0 task ticker, floating button and launcher fixes
+        run: bash .ci/apply-6.6.0.sh
+
+      - name: Apply NetPause 6.7.0 visual consistency, task styling and policy cleanup
+        run: bash .ci/apply-6.7.0.sh
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -179,15 +197,56 @@ jobs:
       - name: Run Android lint
         run: gradle --no-daemon lintDebug
 
-      - name: Keep release signing local
+      - name: Configure persistent application signing (optional until owner adds GitHub secrets)
         id: signing
         shell: bash
+        env:
+          NETPAUSE_KEYSTORE_BASE64: ${{ secrets.NETPAUSE_KEYSTORE_BASE64 }}
+          NETPAUSE_KEYSTORE_PASSWORD: ${{ secrets.NETPAUSE_KEYSTORE_PASSWORD }}
+          NETPAUSE_KEY_ALIAS: ${{ secrets.NETPAUSE_KEY_ALIAS }}
+          NETPAUSE_KEY_PASSWORD: ${{ secrets.NETPAUSE_KEY_PASSWORD }}
         run: |
-          echo 'persistent=false' >> "$GITHUB_OUTPUT"
-          echo "Private signing stays on the owner computer. This public workflow does not receive signing keys or passwords."
+          set -euo pipefail
+          if [[ -z "${NETPAUSE_KEYSTORE_BASE64:-}" || -z "${NETPAUSE_KEYSTORE_PASSWORD:-}" ]]; then
+            echo "persistent=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Persistent signing is not configured. This run's debug APK uses a temporary CI key and is not suitable for updating previous installs."
+            exit 0
+          fi
+          KEYSTORE="$RUNNER_TEMP/netpause-release.p12"
+          printf '%s' "$NETPAUSE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          test -s "$KEYSTORE"
+          keytool -list -keystore "$KEYSTORE" -storetype PKCS12 -storepass "$NETPAUSE_KEYSTORE_PASSWORD" -alias "${NETPAUSE_KEY_ALIAS:-netpause}" >/dev/null
+          {
+            echo "NETPAUSE_KEYSTORE_FILE=$KEYSTORE"
+            echo "NETPAUSE_KEYSTORE_PASSWORD=$NETPAUSE_KEYSTORE_PASSWORD"
+            echo "NETPAUSE_KEY_ALIAS=${NETPAUSE_KEY_ALIAS:-netpause}"
+            echo "NETPAUSE_KEY_PASSWORD=${NETPAUSE_KEY_PASSWORD:-$NETPAUSE_KEYSTORE_PASSWORD}"
+          } >> "$GITHUB_ENV"
+          echo "persistent=true" >> "$GITHUB_OUTPUT"
 
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
+
+      - name: Build signed release APK
+        if: steps.signing.outputs.persistent == 'true'
+        run: gradle --no-daemon assembleRelease
+
+      - name: Verify and package signed release APK
+        if: steps.signing.outputs.persistent == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK_SRC=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
+          test -n "$APK_SRC"
+          mkdir -p dist
+          cp "$APK_SRC" dist/NetPause-6.7.0-release.apk
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          "$BT/aapt2" dump badging dist/NetPause-6.7.0-release.apk > dist/release-badging.txt
+          grep -q "name='ru.netpause.app'" dist/release-badging.txt
+          grep -q "versionCode='35'" dist/release-badging.txt
+          grep -q "versionName='6.7.0'" dist/release-badging.txt
+          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-6.7.0-release.apk > dist/release-signing.txt
+          sha256sum dist/NetPause-6.7.0-release.apk > dist/release-sha256.txt
 
       - name: Verify and package debug APK
         shell: bash
@@ -196,38 +255,51 @@ jobs:
           mkdir -p dist
           APK_SRC=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
           test -n "$APK_SRC"
-          cp "$APK_SRC" dist/NetPause-6.1.0-debug.apk
+          cp "$APK_SRC" dist/NetPause-6.7.0-debug.apk
           BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
-          "$BT/aapt2" dump badging dist/NetPause-6.1.0-debug.apk > dist/debug-badging.txt
+          "$BT/aapt2" dump badging dist/NetPause-6.7.0-debug.apk > dist/debug-badging.txt
           grep -q "name='ru.netpause.app'" dist/debug-badging.txt
-          grep -q "versionCode='29'" dist/debug-badging.txt
-          grep -q "versionName='6.1.0'" dist/debug-badging.txt
-          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-6.1.0-debug.apk > dist/debug-signing.txt
-          sha256sum dist/NetPause-6.1.0-debug.apk > dist/debug-sha256.txt
+          grep -q "versionCode='35'" dist/debug-badging.txt
+          grep -q "versionName='6.7.0'" dist/debug-badging.txt
+          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-6.7.0-debug.apk > dist/debug-signing.txt
+          sha256sum dist/NetPause-6.7.0-debug.apk > dist/debug-sha256.txt
 
-      - name: Archive complete NetPause 6.1.0 source
+      - name: Archive complete NetPause 6.7.0 source
         shell: bash
         run: |
           set -euo pipefail
-          zip -qr dist/NetPause-6.1.0-source.zip . -x '.git/*' '.gradle/*' '*/build/*' 'app/build/*' 'dist/*' '.idea/*' '*.iml' 'local.properties'
+          zip -qr dist/NetPause-6.7.0-source.zip . -x '.git/*' '.gradle/*' '*/build/*' 'app/build/*' 'dist/*' '.idea/*' '*.iml' 'local.properties'
 
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NetPause-6.1.0-debug-apk
+          name: NetPause-6.7.0-debug-apk
           path: |
-            dist/NetPause-6.1.0-debug.apk
+            dist/NetPause-6.7.0-debug.apk
             dist/debug-badging.txt
             dist/debug-signing.txt
             dist/debug-sha256.txt
           if-no-files-found: error
           retention-days: 30
 
+      - name: Upload signed release APK artifact
+        if: steps.signing.outputs.persistent == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetPause-6.7.0-release-apk
+          path: |
+            dist/NetPause-6.7.0-release.apk
+            dist/release-badging.txt
+            dist/release-signing.txt
+            dist/release-sha256.txt
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload source artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NetPause-6.1.0-source
-          path: dist/NetPause-6.1.0-source.zip
+          name: NetPause-6.7.0-source
+          path: dist/NetPause-6.7.0-source.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -235,7 +307,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: NetPause-6.1.0-reports
+          name: NetPause-6.7.0-reports
           path: |
             app/build/reports/tests/
             app/build/reports/lint-results-debug.html
