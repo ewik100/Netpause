@@ -156,29 +156,22 @@ s = manifest.read_text(encoding="utf-8")
 s = s.replace('    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />\n', '')
 manifest.write_text(s, encoding="utf-8")
 
-old_battery_dialog = '''            .setNegativeButton("Не сейчас") { _, _ -> pendingPermissionStep = null }
-            .setNeutralButton("Открыть настройки батареи") { _, _ -> openManualBatterySettings() }
-            .setPositiveButton("Запросить исключение") { _, _ ->
-                try {
-                    startActivity(
-                        Intent(
-                            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                            Uri.parse("package:$packageName")
-                        )
-                    )
-                } catch (_: Exception) {
-                    openManualBatterySettings()
-                }
-            }
-            .show()'''
-new_battery_dialog = '''            .setNegativeButton("Не сейчас") { _, _ -> pendingPermissionStep = null }
-            .setPositiveButton("Открыть настройки батареи") { _, _ ->
-                openManualBatterySettings()
-            }
-            .show()'''
-if old_battery_dialog not in s:
-    raise SystemExit("Missing battery exemption dialog anchor")
-s = s.replace(old_battery_dialog, new_battery_dialog, 1)
+# Replace the battery-exemption action robustly, preserving the prior negative action.
+start = s.find('.setNeutralButton("Открыть настройки батареи")')
+if start < 0:
+    raise SystemExit("Missing battery settings dialog anchor")
+show = s.find(".show()", start)
+if show < 0:
+    raise SystemExit("Missing battery settings dialog terminator")
+line_start = s.rfind("\\n", 0, start) + 1
+indent = s[line_start:start]
+replacement = (
+    indent + '.setPositiveButton("Открыть настройки батареи") { _, _ ->\\n'
+    + indent + '    openManualBatterySettings()\\n'
+    + indent + '}\\n'
+    + indent + '.show()'
+)
+s = s[:line_start] + replacement + s[show + len(".show()"):]
 main.write_text(s, encoding="utf-8")
 
 # Respect API availability and avoid an API-29 constant under an API-23 guard.
