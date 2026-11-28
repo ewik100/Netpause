@@ -36,7 +36,7 @@ end = s.index("    private fun updateBubbleTimer() {", start)
 new_bubble = """    private fun createBubble() {
         val sizeDp = prefs.getInt("overlay_bubble_size_dp_v1", 58).coerceIn(44, 76)
         val icon = ImageView(this).apply {
-            setImageResource(R.drawable.netpause_brand_v2)
+            setImageResource(R.drawable.netpause_emblem)
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = tr("Значок NetPause")
         }
@@ -148,7 +148,7 @@ replace_once(
 """        val iconSize = dp(minOf((sizeDp * 0.68f).toInt(), sizeDp - 17))
         bubbleIcon?.layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
 """,
-"""        val iconSize = dp((sizeDp - 4).coerceAtLeast(1))
+"""        val iconSize = dp((sizeDp - 18).coerceAtLeast(28))
         bubbleIcon?.layoutParams = FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER)
 """,
     "full-size bubble logo"
@@ -171,7 +171,7 @@ replace_once(
         FocusTaskStore.read(prefs).forEachIndexed { index, task ->
             if (index > 0) tickerContent.append("     •     ")
             val start = tickerContent.length
-            val renderedTitle = if (task.completed) "✓ \${task.title}" else task.title
+            val renderedTitle = if (task.completed) "✓ ${task.title}" else task.title
             val available = (700 - tickerContent.length).coerceAtLeast(0)
             val visibleTitle = renderedTitle.take(available)
             if (visibleTitle.isNotEmpty()) {
@@ -203,6 +203,26 @@ launcher.write_text(s.replace(
     '@drawable/netpause_brand_v2',
     '@drawable/netpause_launcher_foreground', 1
 ), encoding="utf-8")
+
+Path("app/src/main/res/drawable/netpause_emblem.xml").write_text(
+'''<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#06152F" android:pathData="M54,4 A50,50 0,1 0,54 104 A50,50 0,1 0,54 4" />
+    <path android:fillColor="#00000000" android:strokeColor="#35E5F4" android:strokeWidth="3.5"
+        android:pathData="M54,7 A47,47 0,1 0,54 101 A47,47 0,1 0,54 7" />
+    <path android:fillColor="#00000000" android:strokeColor="#168BDF" android:strokeWidth="2"
+        android:pathData="M19,38 Q54,5 89,38 M24,46 Q54,19 84,46" />
+    <path android:fillColor="#102E59" android:strokeColor="#54E9F5" android:strokeWidth="2.5"
+        android:pathData="M54,31 L80,42 L77,67 Q72,84 54,94 Q36,84 31,67 L28,42 Z" />
+    <path android:fillColor="#59F0F7" android:pathData="M42,48 L50,48 L50,76 L42,76 Z M58,48 L66,48 L66,76 L58,76 Z" />
+    <path android:fillColor="#00000000" android:strokeColor="#A7F8FF" android:strokeWidth="2"
+        android:pathData="M16,72 Q20,83 30,89 M92,72 Q88,83 78,89" />
+</vector>
+''',
+    encoding="utf-8"
+)
 
 Path("app/src/main/res/drawable/netpause_launcher_foreground.xml").write_text(
 '''<?xml version="1.0" encoding="utf-8"?>
