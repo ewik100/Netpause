@@ -6,9 +6,11 @@ import re
 
 lang = Path("app/src/main/java/ru/netpause/app/AppLanguage.kt")
 s = lang.read_text(encoding="utf-8")
+old_language = '        "Язык: Русский" to "Language: Русский",'
+if old_language not in s:
+    raise SystemExit("Missing AppLanguage language-label anchor")
+s = s.replace(old_language, '        "Язык: Русский" to "Language: Russian",', 1)
 anchor = '        "Язык: Русский" to "Language: Russian",'
-if anchor not in s:
-    raise SystemExit("Missing AppLanguage 6.3 anchor")
 entries = [
     ("NetPause работает", "NetPause is running"),
     ("Плавающая кнопка доступна поверх приложений", "The floating button is available over other apps"),
