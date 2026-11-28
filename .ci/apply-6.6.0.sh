@@ -227,7 +227,7 @@ Path("app/src/main/res/drawable/netpause_emblem.xml").write_text(
 Path("app/src/main/res/drawable/netpause_launcher_foreground.xml").write_text(
 '''<?xml version="1.0" encoding="utf-8"?>
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:drawable="@drawable/netpause_brand_v2"
+    android:drawable="@drawable/netpause_emblem"
     android:insetLeft="18dp"
     android:insetTop="18dp"
     android:insetRight="18dp"
