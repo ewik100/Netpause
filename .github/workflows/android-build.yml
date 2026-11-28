@@ -232,6 +232,7 @@ jobs:
           set -euo pipefail
           APK_SRC=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
           test -n "$APK_SRC"
+          mkdir -p dist
           cp "$APK_SRC" dist/NetPause-6.5.0-release.apk
           BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
           "$BT/aapt2" dump badging dist/NetPause-6.5.0-release.apk > dist/release-badging.txt
