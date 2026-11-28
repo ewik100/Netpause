@@ -79,13 +79,13 @@ s = s.replace('''        TextView(this).apply {
             textSize = size''', 1)
 # Translate static literals assigned directly to widgets and accessibility labels.
 for prop in ("text", "contentDescription", "hint"):
-    s = re.sub(rf'(?m)(\\b{prop}\\s*=\\s*)"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"', lambda m: m.group(1) + 'tr("' + m.group(2) + '")', s)
+    s = re.sub(rf'(?m)(\b{prop}\s*=\s*)"([^"\\]*(?:\\.[^"\\]*)*)"', lambda m: m.group(1) + 'tr("' + m.group(2) + '")', s)
 # Translate static notifications and actions.
 s = s.replace('.setContentTitle("NetPause работает")', '.setContentTitle(tr("NetPause работает"))')
 s = s.replace('.setContentText("Плавающая кнопка доступна поверх приложений")', '.setContentText(tr("Плавающая кнопка доступна поверх приложений"))')
 s = s.replace('"Выключить NetPause", shutdown', 'tr("Выключить NetPause"), shutdown')
 # Literal Toast messages.
-s = re.sub(r'Toast\\.makeText\\((this(?:@OverlayService)?),\\s*"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)",',
+s = re.sub(r'Toast\.makeText\((this(?:@OverlayService)?),\s*"([^"\\]*(?:\\.[^"\\]*)*)",',
            lambda m: f'Toast.makeText({m.group(1)}, tr("{m.group(2)}"),', s)
 s = s.replace('"До конца блокировки ${SessionLogic.formatCountdown(left)}"', 'tr("До конца блокировки") + " " + SessionLogic.formatCountdown(left)')
 s = s.replace('''            "● БЛОКИРОВКА АКТИВНА  " + (total / 60) + ":" + (total % 60).toString().padStart(2, '0')''',
