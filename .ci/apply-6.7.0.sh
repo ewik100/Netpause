@@ -213,10 +213,10 @@ Path("app/src/main/res/drawable/netpause_monochrome.xml").write_text(
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6" android:pathData="M54,12 A42,42 0,1 0,54 96 A42,42 0,1 0,54 12" />
     <path android:fillColor="#FFFFFFFF"
-        android:pathData="M54,8 A46,46 0,1 0,54 100 A46,46 0,1 0,54 8 Z" />
-    <path android:fillColor="#FF06152F"
-        android:pathData="M39,36 L48,36 L48,72 L39,72 Z M60,36 L69,36 L69,72 L60,72 Z" />
+        android:pathData="M37,34 L47,34 L47,74 L37,74 Z M61,34 L71,34 L71,74 L61,74 Z" />
 </vector>
 ''', encoding="utf-8")
 
