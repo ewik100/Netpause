@@ -88,6 +88,8 @@ s = s.replace('"Выключить NetPause", shutdown', 'tr("Выключить
 s = re.sub(r'Toast\.makeText\((this(?:@OverlayService)?),\s*"([^"\\]*(?:\\.[^"\\]*)*)",',
            lambda m: f'Toast.makeText({m.group(1)}, tr("{m.group(2)}"),', s)
 s = s.replace('"До конца блокировки ${SessionLogic.formatCountdown(left)}"', 'tr("До конца блокировки") + " " + SessionLogic.formatCountdown(left)')
+s = s.replace('text = label', 'text = tr(label)')
+s = s.replace('"Запускаю блокировку на $mins мин."', 'tr("Запускаю блокировку на") + " $mins " + tr("мин.")')
 s = s.replace('''            "● БЛОКИРОВКА АКТИВНА  " + (total / 60) + ":" + (total % 60).toString().padStart(2, '0')''',
               '''            tr("● БЛОКИРОВКА АКТИВНА") + "  " + (total / 60) + ":" + (total % 60).toString().padStart(2, '0')''')
 s = s.replace('"○ БЛОКИРОВКА ВЫКЛЮЧЕНА" else "⚠ $error"',
