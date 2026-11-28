@@ -163,12 +163,12 @@ if start < 0:
 show = s.find(".show()", start)
 if show < 0:
     raise SystemExit("Missing battery settings dialog terminator")
-line_start = s.rfind("\\n", 0, start) + 1
+line_start = s.rfind("\n", 0, start) + 1
 indent = s[line_start:start]
 replacement = (
-    indent + '.setPositiveButton("Открыть настройки батареи") { _, _ ->\\n'
-    + indent + '    openManualBatterySettings()\\n'
-    + indent + '}\\n'
+    indent + '.setPositiveButton("Открыть настройки батареи") { _, _ ->\n'
+    + indent + '    openManualBatterySettings()\n'
+    + indent + '}\n'
     + indent + '.show()'
 )
 s = s[:line_start] + replacement + s[show + len(".show()"):]
