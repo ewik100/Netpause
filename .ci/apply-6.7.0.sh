@@ -32,6 +32,7 @@ replace_once(main, 'cornerRadius = dp(14).toFloat()\n                setStroke(d
 replace_once(main, '        private val ring = RectF()',
              '        private val ring = RectF()\n        private val brandDrawable: android.graphics.drawable.Drawable? = this@MainActivity.getDrawable(R.drawable.netpause_emblem)',
              "splash emblem drawable")
+s = main.read_text(encoding="utf-8")
 start = s.index("            // Pulse mark and NP lettering reveal in two deliberate stages.")
 end = s.index("            val glowAngle", start)
 s = s[:start] + """            // The same round brand symbol is used by the launcher and floating control.
