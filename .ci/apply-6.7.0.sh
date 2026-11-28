@@ -149,6 +149,15 @@ if old_desc in s:
     s = s.replace(old_desc, new_desc, 1)
 overlay.write_text(s, encoding="utf-8")
 
+# Use NetPause's own compact monochrome mark in VPN/session notifications too.
+vpn = Path("app/src/main/java/ru/netpause/app/BlockVpnService.kt")
+s = vpn.read_text(encoding="utf-8")
+old_icon = '.setSmallIcon(android.R.drawable.ic_lock_lock)'
+if old_icon not in s:
+    raise SystemExit("Missing generic VPN notification icon")
+s = s.replace(old_icon, '.setSmallIcon(R.drawable.ic_stat_netpause)')
+vpn.write_text(s, encoding="utf-8")
+
 # The app no longer requests a Play-policy-sensitive battery exemption. Users can
 # still open Android's ordinary battery settings themselves when they need to.
 manifest = Path("app/src/main/AndroidManifest.xml")
