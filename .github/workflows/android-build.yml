@@ -174,7 +174,7 @@ jobs:
         run: bash .ci/apply-6.5.0.sh
 
       - name: Apply NetPause 6.6.0 task ticker, floating button and launcher fixes
-        run: bash .ci/apply-6.7.0.sh
+        run: bash .ci/apply-6.6.0.sh
 
       - name: Apply NetPause 6.7.0 visual consistency, task styling and policy cleanup
         run: bash .ci/apply-6.7.0.sh
