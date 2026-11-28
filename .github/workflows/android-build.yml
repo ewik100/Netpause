@@ -238,12 +238,12 @@ jobs:
           mkdir -p dist
           cp "$APK_SRC" dist/NetPause-6.6.0-release.apk
           BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
-          "$BT/aapt2" dump badging dist/NetPause-6.5.0-release.apk > dist/release-badging.txt
+          "$BT/aapt2" dump badging dist/NetPause-6.6.0-release.apk > dist/release-badging.txt
           grep -q "name='ru.netpause.app'" dist/release-badging.txt
           grep -q "versionCode='34'" dist/release-badging.txt
           grep -q "versionName='6.6.0'" dist/release-badging.txt
-          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-6.5.0-release.apk > dist/release-signing.txt
-          sha256sum dist/NetPause-6.5.0-release.apk > dist/release-sha256.txt
+          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-6.6.0-release.apk > dist/release-signing.txt
+          sha256sum dist/NetPause-6.6.0-release.apk > dist/release-sha256.txt
 
       - name: Verify and package debug APK
         shell: bash
@@ -252,27 +252,27 @@ jobs:
           mkdir -p dist
           APK_SRC=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
           test -n "$APK_SRC"
-          cp "$APK_SRC" dist/NetPause-6.5.0-debug.apk
+          cp "$APK_SRC" dist/NetPause-6.6.0-debug.apk
           BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
-          "$BT/aapt2" dump badging dist/NetPause-6.5.0-debug.apk > dist/debug-badging.txt
+          "$BT/aapt2" dump badging dist/NetPause-6.6.0-debug.apk > dist/debug-badging.txt
           grep -q "name='ru.netpause.app'" dist/debug-badging.txt
-          grep -q "versionCode='33'" dist/debug-badging.txt
-          grep -q "versionName='6.5.0'" dist/debug-badging.txt
-          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-6.5.0-debug.apk > dist/debug-signing.txt
-          sha256sum dist/NetPause-6.5.0-debug.apk > dist/debug-sha256.txt
+          grep -q "versionCode='34'" dist/debug-badging.txt
+          grep -q "versionName='6.6.0'" dist/debug-badging.txt
+          "$BT/apksigner" verify --verbose --print-certs dist/NetPause-6.6.0-debug.apk > dist/debug-signing.txt
+          sha256sum dist/NetPause-6.6.0-debug.apk > dist/debug-sha256.txt
 
-      - name: Archive complete NetPause 6.5.0 source
+      - name: Archive complete NetPause 6.6.0 source
         shell: bash
         run: |
           set -euo pipefail
-          zip -qr dist/NetPause-6.5.0-source.zip . -x '.git/*' '.gradle/*' '*/build/*' 'app/build/*' 'dist/*' '.idea/*' '*.iml' 'local.properties'
+          zip -qr dist/NetPause-6.6.0-source.zip . -x '.git/*' '.gradle/*' '*/build/*' 'app/build/*' 'dist/*' '.idea/*' '*.iml' 'local.properties'
 
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NetPause-6.5.0-debug-apk
+          name: NetPause-6.6.0-debug-apk
           path: |
-            dist/NetPause-6.5.0-debug.apk
+            dist/NetPause-6.6.0-debug.apk
             dist/debug-badging.txt
             dist/debug-signing.txt
             dist/debug-sha256.txt
@@ -283,9 +283,9 @@ jobs:
         if: steps.signing.outputs.persistent == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: NetPause-6.5.0-release-apk
+          name: NetPause-6.6.0-release-apk
           path: |
-            dist/NetPause-6.5.0-release.apk
+            dist/NetPause-6.6.0-release.apk
             dist/release-badging.txt
             dist/release-signing.txt
             dist/release-sha256.txt
@@ -295,8 +295,8 @@ jobs:
       - name: Upload source artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NetPause-6.5.0-source
-          path: dist/NetPause-6.5.0-source.zip
+          name: NetPause-6.6.0-source
+          path: dist/NetPause-6.6.0-source.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -304,7 +304,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: NetPause-6.5.0-reports
+          name: NetPause-6.6.0-reports
           path: |
             app/build/reports/tests/
             app/build/reports/lint-results-debug.html
